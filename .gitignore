@@ -1,0 +1,15 @@
+# Build artifacts
+.build/
+build/
+*.dSYM
+
+# macOS
+.DS_Store
+
+# Local tooling 
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Temp docs
+workdocs/

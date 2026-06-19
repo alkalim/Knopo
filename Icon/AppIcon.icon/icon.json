@@ -1,0 +1,19 @@
+{
+  "fill" : "automatic-gradient:extended-srgb:0.33333,0.66667,1.00000,1.00000",
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "Glyph.svg",
+          "name" : "Glyph"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
