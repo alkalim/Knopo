@@ -771,6 +771,10 @@ final class OutlineEditorController: NSObject {
             guard hasSelection else { return false }
             copySelection()
             return true
+        case 9 where flags.contains(.command): // Cmd+V
+            guard hasSelection else { return false }
+            pasteSelection()
+            return true
         case 0 where flags.contains(.command): // Cmd+A
             setSelection(Set(rows.indices), anchor: 0)
             return true
@@ -809,16 +813,54 @@ final class OutlineEditorController: NSObject {
         tableView.window?.makeFirstResponder(tableView)
     }
 
+    /// Selected rows whose ancestor isn't *also* selected. `copyMarkdown` emits a
+    /// block with its whole subtree, so a selected descendant is already covered
+    /// by its selected ancestor — treating only the top-most ones avoids
+    /// duplicating nested blocks on copy and gives paste a sane anchor.
+    private func topMostSelectedRows() -> [Int] {
+        let selectedPaths = Set(selectedRows.compactMap {
+            rows.indices.contains($0) ? rows[$0].path : nil
+        })
+        return selectedRows.sorted().filter { row in
+            guard rows.indices.contains(row) else { return false }
+            let path = rows[row].path
+            return !(1..<path.count).contains { selectedPaths.contains(Array(path.prefix($0))) }
+        }
+    }
+
     private func copySelection() {
         let doc = app.document(for: pageName)
-        let markdown = selectedRows.sorted().compactMap { row -> String? in
-            guard rows.indices.contains(row),
-                  let block = doc.blocks.block(id: rows[row].block.id) else { return nil }
+        let markdown = topMostSelectedRows().compactMap { row -> String? in
+            guard let block = doc.blocks.block(id: rows[row].block.id) else { return nil }
             return OutlineOps.copyMarkdown(block)
         }.joined()
         guard !markdown.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(markdown, forType: .string)
+    }
+
+    /// Cmd+V in node-selection mode: paste the clipboard's blocks right after the
+    /// last top-most selected block (as its sibling), then select the result.
+    /// (In edit mode the text view handles paste itself.)
+    private func pasteSelection() {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        let pasted = OutlineOps.blocksFromPasted(text)
+        guard !pasted.isEmpty, let anchorRow = topMostSelectedRows().last,
+              rows.indices.contains(anchorRow) else { return }
+        var doc = app.document(for: pageName)
+        guard var insertAt = doc.blocks.path(to: rows[anchorRow].block.id) else { return }
+        insertAt[insertAt.count - 1] += 1 // after the anchor block (and its subtree)
+        for (i, block) in pasted.enumerated() {
+            var p = insertAt
+            p[p.count - 1] += i
+            doc.blocks.insert(block, at: p)
+        }
+        commitStructural(doc, label: "Paste")
+        clearSelection()
+        reloadAndFocus(nil, selection: nil)
+        let pastedIDs = Set(pasted.map(\.id))
+        let newSel = Set(rows.indices.filter { pastedIDs.contains(rows[$0].block.id) })
+        if let anchor = newSel.min() { setSelection(newSel, anchor: anchor) }
     }
 
     private func deleteSelection() {
@@ -1388,6 +1430,24 @@ extension OutlineEditorController: BlockEditorActions {
         let content = doc.blocks.block(id: receiver)?.content ?? ""
         let caret = Self.utf16Offset(forCharacterOffset: characterOffset, in: content)
         reloadAndFocus(receiver, selection: NSRange(location: caret, length: 0))
+    }
+
+    func editorMergeWithNext() {
+        guard let id = focusedBlockID,
+              let index = rows.firstIndex(where: { $0.block.id == id }),
+              index + 1 < rows.count else { return }
+        let next = rows[index + 1]
+        // Symmetric with backward merge: can't pull up a block that has children,
+        // and won't silently drop a block's properties (merge only moves content).
+        guard !next.hasChildren, next.block.properties.isEmpty else { return }
+        let caretOffset = (rows[index].block.content as NSString).length
+        var doc = app.document(for: pageName)
+        // Merging the next block "into its previous" (= this block) is exactly a
+        // forward delete: its content appends here and the caret stays at the join.
+        guard let nextPath = doc.blocks.path(to: next.block.id),
+              OutlineOps.mergeWithPrevious(nextPath, in: &doc.blocks) != nil else { return }
+        commitStructural(doc, label: "Merge Blocks")
+        reloadAndFocus(id, selection: NSRange(location: caretOffset, length: 0))
     }
 
     func editorEndEditing() {

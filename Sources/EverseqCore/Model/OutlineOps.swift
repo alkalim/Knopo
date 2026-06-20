@@ -77,13 +77,33 @@ public enum OutlineOps {
         return true
     }
 
-    /// Shift+Tab: block becomes the sibling right after its parent.
+    /// Shift+Tab: block becomes the sibling right after its parent, adopting any
+    /// siblings that followed it as its own children (Logseq behavior). Without
+    /// adopting them the block would jump *below* those trailing siblings instead
+    /// of staying put visually.
     @discardableResult
     public static func outdent(_ path: [Int], in blocks: inout [Block]) -> Bool {
-        guard path.count >= 2 else { return false }
+        guard let last = path.last, path.count >= 2 else { return false }
+        let parentPath = Array(path.dropLast())
+        let siblingCount = blocks.block(at: parentPath)?.children.count ?? 0
+        guard last < siblingCount else { return false }
+        // Pull out the following siblings first (back-to-front keeps indices
+        // valid) so they can be re-parented under the outdented block.
+        var following: [Block] = []
+        var i = siblingCount - 1
+        while i > last {
+            var sib = path
+            sib[sib.count - 1] = i
+            if let removed = blocks.remove(at: sib) { following.insert(removed, at: 0) }
+            i -= 1
+        }
         guard var moved = blocks.remove(at: path) else { return false }
-        moved.invalidateRaw(deep: true)
-        var target = Array(path.dropLast())
+        if !following.isEmpty {
+            moved.children.append(contentsOf: following)
+            moved.collapsed = false
+        }
+        moved.invalidateRaw(deep: true) // deep: also re-serializes adopted children
+        var target = parentPath
         target[target.count - 1] += 1
         blocks.insert(moved, at: target)
         return true

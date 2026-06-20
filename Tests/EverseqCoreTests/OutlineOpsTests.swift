@@ -80,6 +80,24 @@ import Foundation
         expectFalse(OutlineOps.outdent([0], in: &blocks))
     }
 
+    @Test func outdentAdoptsFollowingSiblings() {
+        // a > (b, c, d, e); outdent c → c becomes a's next sibling and adopts
+        // the siblings that followed it (d, e), instead of jumping below them.
+        var blocks = forest("- a\n  - b\n  - c\n  - d\n  - e\n")
+        expectTrue(OutlineOps.outdent([0, 1], in: &blocks)) // c is child index 1
+        expectEqual(blocks.map(\.content), ["a", "c"])
+        expectEqual(blocks[0].children.map(\.content), ["b"])
+        expectEqual(blocks[1].children.map(\.content), ["d", "e"])
+    }
+
+    @Test func outdentWithNoFollowingSiblingsJustMovesUp() {
+        var blocks = forest("- a\n  - b\n  - c\n")
+        expectTrue(OutlineOps.outdent([0, 1], in: &blocks)) // c is last child
+        expectEqual(blocks.map(\.content), ["a", "c"])
+        expectEqual(blocks[0].children.map(\.content), ["b"])
+        expectTrue(blocks[1].children.isEmpty)
+    }
+
     @Test func indentIntoCollapsedParentExpandsIt() {
         var blocks = forest("- a\n  - a1\n  collapsed:: true\n- b\n")
         // (collapsed:: on "a" via canonical file would sit under a; build manually)

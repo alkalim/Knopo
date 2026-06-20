@@ -11,6 +11,7 @@ protocol BlockEditorActions: AnyObject {
     func editorOutdent()
     func editorDeleteEmptyBlock()
     func editorMergeWithPrevious()
+    func editorMergeWithNext()
     func editorMoveBlock(by delta: Int)
     func editorToggleTodo()
     func editorEndEditing()
@@ -230,6 +231,15 @@ final class BlockEditorTextView: NSTextView {
                 } else {
                     actions?.editorMergeWithPrevious()
                 }
+                return
+            }
+            super.doCommand(by: selector)
+        case #selector(NSResponder.deleteForward(_:)):
+            // Del at the very end of a block pulls the next block's content up
+            // into this one — the mirror of Backspace-at-start.
+            let sel = selectedRange()
+            if sel.length == 0 && sel.location == (string as NSString).length {
+                actions?.editorMergeWithNext()
                 return
             }
             super.doCommand(by: selector)
