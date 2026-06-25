@@ -246,6 +246,15 @@ Acceptance criteria for §5.5.1–5.5.4:
 5. `/date` opens the calendar; picking June 10 2026 inserts `[[2026-06-10]]` (rendering as "Jun 10th, 2026"); `Esc` inserts nothing.
 6. All commands replace the typed trigger text exactly (no stray `/`), participate in the edit session's undo step, and round-trip byte-stably like any block content (§4.2).
 
+### 5.6 Block background colors
+
+A block can carry a background color, rendered as a soft rounded box behind its content.
+
+- **Setting.** Right-click the block's bullet → **Background Color** → pick a preset, or **None** to clear. The current color is checkmarked.
+- **Palette.** A fixed set of named colors — gray, red, orange, yellow, green, blue, purple, pink — each appearance-aware (soft pastel in light, muted in dark). Names, not hex, so the tint adapts and stays portable.
+- **Storage.** A *hidden* block property `background-color:: <name>`. Like `id::` / `collapsed::` (§4.2), it round-trips in the file but is never shown as editable property text or rendered as a `key: value` line — only its effect (the colored box) appears. Unknown values render no box.
+- **Scope.** v1 tints the block's own content area; it does not extend the color over the block's children.
+
 ---
 
 ## 6. Page references — `[[Page]]`

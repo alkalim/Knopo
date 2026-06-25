@@ -44,6 +44,31 @@ import Foundation
         expectTrue(block.idPersisted) // still preserved
     }
 
+    @Test func backgroundColorIsHiddenButPreserved() {
+        // `background-color::` is a hidden display property (set via the bullet
+        // menu): it stays out of the editor but survives an edit round-trip.
+        var block = Block(
+            content: "colored block",
+            properties: [BlockProperty(key: "background-color", value: "blue"),
+                         BlockProperty(key: "status", value: "open")]
+        )
+        // Editor shows the user prop but not the hidden color.
+        expectEqual(block.editableSource, "colored block\nstatus:: open")
+        // Editing the body (color not shown) keeps the color.
+        block.setEditableSource("colored block edited\nstatus:: open")
+        expectEqual(block.content, "colored block edited")
+        expectTrue(block.properties.contains(BlockProperty(key: "background-color", value: "blue")))
+        expectTrue(block.properties.contains(BlockProperty(key: "status", value: "open")))
+    }
+
+    @Test func backgroundColorRoundTripsInFile() {
+        let page = "- colored block\n  background-color:: green\n"
+        let parsed = PageParser.parse(page)
+        expectEqual(parsed.blocks.first?.properties,
+                    [BlockProperty(key: "background-color", value: "green")])
+        expectEqual(PageSerializer.serialize(parsed), page)
+    }
+
     @Test func editRoundTripThroughEditableSource() {
         // What the editor shows, edited and set back, is stable.
         var block = Block(content: "note",

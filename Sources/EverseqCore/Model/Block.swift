@@ -91,33 +91,44 @@ public struct Block: Identifiable, Sendable {
 
     // MARK: - Editable source (properties as first-class, editable text)
 
+    /// Display/rendering properties that affect *how* a block looks but aren't
+    /// shown as editable `key:: value` text — set via UI (e.g. the bullet menu),
+    /// like Logseq's hidden built-in properties. They round-trip in the file but
+    /// stay out of the editor and the rendered body.
+    public static let hiddenPropertyKeys: Set<String> = ["background-color"]
+
     /// The block's raw body as shown in the focused editor: content lines
     /// followed by user `key:: value` property lines. The machine-managed
-    /// `id::` / `collapsed::` are deliberately omitted (like Logseq's hidden
-    /// built-in properties), so editing them isn't possible by accident.
+    /// `id::` / `collapsed::` and the hidden display properties above are
+    /// deliberately omitted, so editing them isn't possible by accident.
     public var editableSource: String {
         var lines = content.isEmpty ? [] : content.components(separatedBy: "\n")
-        lines += properties.map { "\($0.key):: \($0.value)" }
+        lines += properties
+            .filter { !Self.hiddenPropertyKeys.contains($0.key) }
+            .map { "\($0.key):: \($0.value)" }
         return lines.joined(separator: "\n")
     }
 
     /// Inverse of `editableSource`: re-splits edited text into content and user
-    /// properties, preserving `id`/`collapsed` (never shown in the editor).
+    /// properties, preserving `id`/`collapsed` and the hidden display properties
+    /// (none of which are shown in the editor).
     public mutating func setEditableSource(_ text: String) {
+        let preserved = properties.filter { Self.hiddenPropertyKeys.contains($0.key) }
         var newContent: [String] = []
         var newProps: [BlockProperty] = []
         for line in text.components(separatedBy: "\n") {
-            // `id`/`collapsed` aren't shown in the editor; if typed, leave them
-            // as content rather than hijacking the machine properties.
+            // `id`/`collapsed`/hidden keys aren't shown in the editor; if typed,
+            // leave them as content rather than hijacking the managed properties.
             if let prop = PageParser.matchProperty(line),
-               prop.key != "id", prop.key != "collapsed" {
+               prop.key != "id", prop.key != "collapsed",
+               !Self.hiddenPropertyKeys.contains(prop.key) {
                 newProps.append(prop)
             } else {
                 newContent.append(line)
             }
         }
         content = newContent.joined(separator: "\n")
-        properties = newProps
+        properties = newProps + preserved
     }
 }
 

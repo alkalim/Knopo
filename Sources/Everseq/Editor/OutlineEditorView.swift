@@ -140,6 +140,8 @@ final class OutlineEditorController: NSObject {
     /// Last `nav.highlightToken` this outline acted on, so a scroll-to/flash
     /// request fires exactly once per click.
     private var lastHighlightToken = 0
+    /// Block whose bullet context menu is open, for its color submenu actions.
+    private var contextMenuBlockID: UUID?
     /// The block currently being rendered, so a `{{query}}` can exclude itself.
     private var renderingBlockID: UUID?
     /// Snapshot when the edit session started; structural ops batch all
@@ -606,7 +608,7 @@ final class OutlineEditorController: NSObject {
             .font: NSFont.systemFont(ofSize: BlockRenderer.baseFontSize),
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
-        for prop in block.properties {
+        for prop in block.properties where !Block.hiddenPropertyKeys.contains(prop.key) {
             if out.length > 0 {
                 out.append(NSAttributedString(string: "\n", attributes: valueAttrs))
             }
@@ -1078,6 +1080,13 @@ final class OutlineEditorController: NSObject {
         copyMarkdown.target = self
         copyMarkdown.representedObject = id
         menu.addItem(copyMarkdown)
+
+        menu.addItem(.separator())
+        contextMenuBlockID = id
+        let colorItem = NSMenuItem(title: "Background Color", action: nil, keyEquivalent: "")
+        colorItem.submenu = backgroundColorMenu(for: id)
+        menu.addItem(colorItem)
+
         menu.addItem(.separator())
         let delete = NSMenuItem(
             title: "Delete Block", action: #selector(deleteBlockAction(_:)), keyEquivalent: ""
@@ -1086,6 +1095,55 @@ final class OutlineEditorController: NSObject {
         delete.representedObject = id
         menu.addItem(delete)
         NSMenu.popUpContextMenu(menu, with: event, for: view)
+    }
+
+    /// The color palette submenu (Logseq-style). A checkmark marks the block's
+    /// current color; "None" clears it.
+    private func backgroundColorMenu(for id: UUID) -> NSMenu {
+        let current = app.document(for: pageName).blocks.block(id: id)?
+            .properties.first { $0.key == BlockColor.propertyKey }?.value
+        let submenu = NSMenu()
+        let none = NSMenuItem(title: "None", action: #selector(setBlockColor(_:)), keyEquivalent: "")
+        none.target = self
+        none.representedObject = ""        // empty = clear
+        none.state = current == nil ? .on : .off
+        submenu.addItem(none)
+        submenu.addItem(.separator())
+        for color in BlockColor.allCases {
+            let item = NSMenuItem(
+                title: color.displayName, action: #selector(setBlockColor(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = color.rawValue
+            item.image = Self.colorSwatch(color.swatch)
+            item.state = current == color.rawValue ? .on : .off
+            submenu.addItem(item)
+        }
+        return submenu
+    }
+
+    /// A small filled-circle swatch for a color menu item.
+    private static func colorSwatch(_ color: NSColor) -> NSImage {
+        let size = NSSize(width: 12, height: 12)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(origin: .zero, size: size).insetBy(dx: 1, dy: 1)).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    @objc private func setBlockColor(_ sender: NSMenuItem) {
+        guard let id = contextMenuBlockID, let name = sender.representedObject as? String else { return }
+        var doc = app.document(for: pageName)
+        guard let path = doc.blocks.path(to: id) else { return }
+        doc.blocks.update(at: path) { block in
+            block.properties.removeAll { $0.key == BlockColor.propertyKey }
+            if !name.isEmpty {
+                block.properties.append(BlockProperty(key: BlockColor.propertyKey, value: name))
+            }
+        }
+        commitStructural(doc, label: "Background Color")
+        reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil ? editor.selectedRange() : nil)
     }
 
     @objc private func copyBlockRef(_ sender: NSMenuItem) {
@@ -1254,6 +1312,10 @@ extension OutlineEditorController: NSTableViewDataSource, NSTableViewDelegate {
         // so a freshly-created block you're about to type in keeps its bullet.
         let isEmptyLeaf = !model.hasChildren && model.block.content.isEmpty
             && model.block.id != focusedBlockID
+        // `background-color:: <name>` tints the block as a soft colored box (SPEC §5.6).
+        let blockColor = model.block.properties
+            .first { $0.key == BlockColor.propertyKey }
+            .flatMap { BlockColor(rawValue: $0.value) }?.background
         cell.configure(
             depth: model.depth,
             hasChildren: model.hasChildren,
@@ -1264,6 +1326,7 @@ extension OutlineEditorController: NSTableViewDataSource, NSTableViewDelegate {
             isEmptyLeaf: isEmptyLeaf,
             selected: selectedRows.contains(row),
             lineHeight: BlockRenderer.lineHeight(forSource: model.block.content),
+            blockColor: blockColor,
             callbacks: rowCallbacks(for: model.block.id)
         )
         if model.block.id == focusedBlockID {

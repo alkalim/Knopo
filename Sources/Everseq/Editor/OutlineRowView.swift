@@ -44,6 +44,8 @@ final class OutlineRowCell: NSTableCellView {
     private let quoteBar = QuoteBarView(frame: .zero)
     private let codeBackground = CodeBackgroundView(frame: .zero)
     private let embedBackground = EmbedBackgroundView(frame: .zero)
+    private let colorBackground = ColorBoxView(frame: .zero)  // background-color:: box
+    private var blockColor: NSColor?
     private var depth = 0
     private var isQuote = false
     private var isCode = false
@@ -96,7 +98,10 @@ final class OutlineRowCell: NSTableCellView {
         }
         renderedView.onHoverEnded = { [weak self] in self?.closePreview() }
         // Backgrounds sit behind the text so a code/embed block reads as one
-        // filled box (full content width, no per-line gaps).
+        // filled box (full content width, no per-line gaps). The color box is
+        // furthest back so it tints the whole block (incl. when focused/editing).
+        colorBackground.isHidden = true
+        container.addSubview(colorBackground)
         embedBackground.isHidden = true
         container.addSubview(embedBackground)
         codeBackground.isHidden = true
@@ -111,7 +116,7 @@ final class OutlineRowCell: NSTableCellView {
 
     func configure(depth: Int, hasChildren: Bool, collapsed: Bool,
                    isQuote: Bool, isCode: Bool, isEmbed: Bool, isEmptyLeaf: Bool, selected: Bool,
-                   lineHeight: CGFloat,
+                   lineHeight: CGFloat, blockColor: NSColor?,
                    callbacks: OutlineRowCallbacks) {
         self.depth = depth
         self.isQuote = isQuote
@@ -119,6 +124,9 @@ final class OutlineRowCell: NSTableCellView {
         self.isEmbed = isEmbed
         self.firstLineHeight = lineHeight
         self.callbacks = callbacks
+        self.blockColor = blockColor
+        colorBackground.color = blockColor ?? .clear
+        colorBackground.isHidden = blockColor == nil
         if isSelectedBlock != selected { isSelectedBlock = selected; needsDisplay = true }
         renderedView.onSelectRequest = { [weak self] extend, toggle in
             self?.callbacks.selectBlock(extend, toggle)
@@ -147,7 +155,8 @@ final class OutlineRowCell: NSTableCellView {
     func showRendered(_ attributed: NSAttributedString) {
         for view in container.subviews
         where view !== renderedView && view !== quoteBar
-            && view !== codeBackground && view !== embedBackground {
+            && view !== codeBackground && view !== embedBackground
+            && view !== colorBackground {
             view.removeFromSuperview()
         }
         renderedView.isHidden = false
@@ -283,6 +292,7 @@ final class OutlineRowCell: NSTableCellView {
             height: max(0, container.bounds.height - (Self.contentInsetV - 2) * 2)
         )
         codeBackground.frame = boxFrame
+        colorBackground.frame = boxFrame
         // The embed background hugs only the transcluded line fragments (so a
         // block mixing its own text with an embed greys just the embed), full
         // content width, with a couple px of vertical breathing room.
@@ -592,6 +602,19 @@ final class CodeBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.quaternarySystemFill.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+    }
+}
+
+// MARK: - Block color background
+
+/// The soft rounded box behind a block carrying `background-color::`. Color is
+/// set by the cell from the block's property.
+final class ColorBoxView: NSView {
+    var color: NSColor = .clear { didSet { needsDisplay = true } }
+    override func draw(_ dirtyRect: NSRect) {
+        guard color != .clear else { return }
+        color.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
     }
 }
 
