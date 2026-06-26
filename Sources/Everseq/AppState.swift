@@ -169,9 +169,21 @@ final class AppState: ObservableObject {
     /// object's concern.
     @discardableResult
     func renamePage(from old: String, to new: String) throws -> Bool {
+        // Flush debounced edits first: the rewrite picks its targets from the
+        // index (`cache.pagesReferencing`), so an unsaved page that just gained
+        // a `[[old]]` reference would otherwise be skipped.
+        flushPendingSaves()
         _ = try store.renamePage(from: old, to: new)
         dataVersion += 1
         return true
+    }
+
+    /// Renames a tag across the graph. Flushes pending edits first for the same
+    /// reason as `renamePage` (the rewrite is index-driven).
+    func renameTag(from old: String, to new: String) throws {
+        flushPendingSaves()
+        _ = try store.renameTag(from: old, to: new)
+        dataVersion += 1
     }
 
     func deletePage(named name: String) throws {

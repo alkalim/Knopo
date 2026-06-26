@@ -235,9 +235,8 @@ enum PageActions {
             let new = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             guard !new.isEmpty, new != tag else { return }
             do {
-                try app.store.renameTag(from: tag, to: new)
+                try app.renameTag(from: tag, to: new)
                 nav.navigate(to: .tag(new))
-                app.dataVersion += 1
             } catch {
                 NSAlert(error: error).runModal()
             }

@@ -132,10 +132,9 @@ struct TagViewScreen: View {
             return
         }
         do {
-            try app.store.renameTag(from: tag, to: newTag)
+            try app.renameTag(from: tag, to: newTag)
             renameShown = false
             nav.navigate(to: .tag(newTag))
-            app.dataVersion += 1
         } catch {
             NSAlert(error: error).runModal()
         }
