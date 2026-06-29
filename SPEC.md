@@ -1,6 +1,6 @@
 # Everseq — Specification
 
-A local-first, single-user outliner in the spirit of Logseq: everything is a block, pages are trees of blocks, knowledge is connected through `[[Page]]` references and block references, and a daily journal is the default entry point.
+A local-first, single-user outliner: everything is a block, pages are trees of blocks, knowledge is connected through `[[Page]]` references and block references, and a daily journal is the default entry point.
 
 This document specifies functional behavior, the data model, the on-disk format, and the chosen technology stack (§15). Everseq is a native macOS application.
 
@@ -80,7 +80,7 @@ Rules:
 
 - Page names are unique **case-insensitively**: `[[Project X]]` and `[[project x]]` resolve to the same page. The display name uses the casing from when the page was first created; renaming can change it.
 - Forbidden characters in page names: `/ \ # [ ]` and leading/trailing whitespace. `/` is reserved for hierarchy (see below).
-- **Namespaces**: a `/` in a page name (`[[Projects/Outliner]]`) creates a flat page whose name contains the separator. The page browser groups such pages hierarchically for display, but there is no inheritance or other semantics. (This matches Logseq's namespace behavior.)
+- **Namespaces**: a `/` in a page name (`[[Projects/Outliner]]`) creates a flat page whose name contains the separator. The page browser groups such pages hierarchically for display, but there is no inheritance or other semantics.
 - A page exists if (a) its file exists, or (b) it is referenced from somewhere. Case (b) is a **stub page**: it has no file until the user adds content to it. Linked references still work on stubs.
 
 ### 3.3 Tag
@@ -162,7 +162,7 @@ A block whose content starts with a recognized prefix renders accordingly:
 |---|---|
 | `# ` … `###### ` | heading (heading level is visual only; outline depth is independent) |
 | `> ` | block quote |
-| `#+BEGIN_QUOTE` … `#+END_QUOTE` | block quote (Logseq/org-mode container form; render-only, recognized for compatibility — the markers round-trip untouched) |
+| `#+BEGIN_QUOTE` … `#+END_QUOTE` | block quote (org-mode container form; render-only, recognized for compatibility — the markers round-trip untouched) |
 | ```` ``` ```` fenced code | code block (the whole fence is one block). Inside a focused fence, `Enter` inserts a newline and `Tab` inserts an indent, instead of acting on the outline. No per-language syntax highlighting in v1 — the language tag is stored and shown, code renders monospace |
 | `---` alone | horizontal rule |
 | `TODO ` / `DONE ` | checkbox-style rendering with click-to-toggle; stored as the literal keyword (no task engine behind it). `Cmd+Enter` in the focused block cycles plain → `TODO` → `DONE` |
@@ -321,7 +321,7 @@ A block whose content contains `{{embed ((uuid))}}` or `{{embed [[Page Name]]}}`
 
 ## 8. Tags — `#tag`
 
-**Design decision (divergence from Logseq): tags are labels, not pages.** `#urgent` creates no page, has no content, and never appears in the page list or `[[` autocomplete.
+**Design decision: tags are labels, not pages.** `#urgent` creates no page, has no content, and never appears in the page list or `[[` autocomplete.
 
 ### 8.1 Syntax
 
@@ -367,14 +367,14 @@ The reference index updates incrementally on every block commit (debounced ~300 
 
 - One journal page per calendar day, named by ISO date `2026-06-10`, displayed using the user's date format setting (default `Jun 10th, 2026`), stored in `journals/`. New journals are created with ISO filenames.
 - **Logseq compatibility:** journal files written by Logseq use the `yyyy_MM_dd` (underscore) filename form. These are recognized as journals and read normally.
-- **Date identity is canonical.** Any spelling of a day — `2026-06-10`, `2026_06_10` — resolves to one journal identity (keyed by the ISO date). So an ISO `[[2026-06-10]]` reference links to an imported underscore-named journal file, with working backlinks, and navigation finds the existing file regardless of separator. (Logseq's *title-form* references like `[[Jun 10th, 2026]]` are **not** resolved — that would require a configurable date-title parser; see the divergence note below.)
+- **Date identity is canonical.** Any spelling of a day — `2026-06-10`, `2026_06_10` — resolves to one journal identity (keyed by the ISO date). So an ISO `[[2026-06-10]]` reference links to an imported underscore-named journal file, with working backlinks, and navigation finds the existing file regardless of separator. (*Title-form* references like `[[Jun 10th, 2026]]` are **not** resolved — that would require a configurable date-title parser; see the design note below.)
 - **Today's page is the app's home view.** The journal home shows today followed by previous days, infinite-scrolling backwards. Empty past days are skipped; today appears even when empty.
 - Today's page (and only today's) is created lazily: the file is written on first content, but the page is always navigable.
 - A date-picker (Journal sidebar context menu → "Jump to Day…") jumps to any day, creating a stub for future/past days on demand.
 - Journal pages are ordinary pages in every other respect: they can be referenced (`[[2026-06-10]]`), favourited, and they show linked references — this is what makes "what links to this day" work for date references. A date reference renders as the formatted display title ("Jun 10th, 2026") while the file keeps the stable ISO text (§5.1).
 - Typing `/today`, `/tomorrow`, `/yesterday` in a block inserts the corresponding `[[date]]` reference. `/date` opens a calendar to insert `[[date]]` for any chosen day (§5.5.4); free-form natural-language date entry ("next friday") is deferred.
 
-**Divergence from Logseq (deliberate):** EverSeq references journals by their stable ISO date and renders the pretty title at display time, rather than storing the human title in the file as Logseq does. This keeps references parser-free and format-stable (changing the display format can never orphan references), at the cost of not resolving Logseq's title-form date references.
+**Design note (deliberate):** Everseq references journals by their stable ISO date and renders the pretty title at display time, rather than storing the human title in the file. This keeps references parser-free and format-stable (changing the display format can never orphan references), at the cost of not resolving title-form date references.
 
 ---
 
