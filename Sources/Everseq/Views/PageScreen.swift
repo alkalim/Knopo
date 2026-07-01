@@ -49,7 +49,7 @@ struct PageScreen: View {
     private func header(_ doc: PageDocument) -> some View {
         HStack(spacing: 8) {
             Text(doc.displayTitle)
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 24 * BlockRenderer.zoom, weight: .bold))
             if !doc.fileExists {
                 Text("stub")
                     .font(.caption2)

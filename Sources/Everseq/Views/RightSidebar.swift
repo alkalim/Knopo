@@ -80,7 +80,7 @@ struct RightSidebar: View {
                         .rotationEffect(.degrees(pane.collapsed ? 0 : 90))
                         .animation(.easeInOut(duration: 0.15), value: pane.collapsed)
                     Text(paneTitle(pane.target))
-                        .font(.caption.weight(.semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
