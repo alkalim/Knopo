@@ -106,6 +106,11 @@ public enum BlockKind: Equatable, Sendable {
 /// opaque. Unmatched delimiters fall back to literal text.
 public enum InlineParser {
 
+    /// Characters with special inline meaning that a leading `\` escapes: the
+    /// token openers (`#` `[` `(` `{`) and the formatting markers
+    /// (`` ` `` `*` `~` `=` `$`). Not `\` itself (so `\\` stays literal).
+    static let escapable: Set<Character> = ["#", "[", "(", "{", "`", "*", "~", "=", "$"]
+
     public static func parse(_ text: String) -> [InlineNode] {
         let chars = Array(text)
         var nodes: [InlineNode] = []
@@ -162,6 +167,22 @@ public enum InlineParser {
             let prev: Character? = i > 0 ? chars[i - 1] : nil
 
             switch c {
+            case "\\":
+                // A backslash escapes the next character when it has special
+                // inline meaning, emitting it as literal text (and consuming the
+                // backslash) — so `\#tag`, `\[[Page]]`, `\((id))`, `\{{query}}`,
+                // `` \`code` ``, `\*`, `\~`, `\=`, and `\$5` are never parsed as a
+                // tag / ref / query / code / emphasis / math (nor indexed as one).
+                // `\` itself isn't escapable, so `\\` stays two backslashes and
+                // paths like `C:\Users` are untouched. Before an ordinary
+                // character the backslash stays literal.
+                if i + 1 < chars.count, Self.escapable.contains(chars[i + 1]) {
+                    literal.append(chars[i + 1])
+                    i += 2
+                } else {
+                    literal.append(c); i += 1
+                }
+
             case "\n":
                 flush()
                 nodes.append(.lineBreak)

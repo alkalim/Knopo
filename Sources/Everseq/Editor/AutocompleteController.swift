@@ -125,6 +125,8 @@ final class AutocompleteController: NSObject {
         let searchRange = NSRange(location: windowStart, length: caret - windowStart)
         let openRange = text.range(of: open, options: .backwards, range: searchRange)
         guard openRange.location != NSNotFound else { return nil }
+        // A backslash before the opener escapes it (`\[[`, `\((`) — no trigger.
+        if openRange.location > 0, text.character(at: openRange.location - 1) == 0x5C { return nil }
         let queryStart = openRange.location + 2
         guard caret >= queryStart else { return nil }
         let query = text.substring(with: NSRange(location: queryStart, length: caret - queryStart))
@@ -148,6 +150,8 @@ final class AutocompleteController: NSObject {
             let previous = text.character(at: i - 1)
             // Word start only: `a#b` is not a tag, `a/b` is not a command.
             if isWordChar(previous) || previous == triggerChar { return nil }
+            // A backslash escapes the trigger (`\#`) — no autocomplete.
+            if previous == 0x5C /* \ */ { return nil }
             if mode == .command, !isWhitespace(previous) { return nil }
         }
         let query = text.substring(with: NSRange(location: i + 1, length: caret - i - 1))

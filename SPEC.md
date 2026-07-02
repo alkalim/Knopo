@@ -153,6 +153,9 @@ Rules:
 | `((uuid))` | block reference (§7) |
 | `#tag`, `#[[multi word tag]]` | tag chip (§8) |
 | `$...$` | inline math (KaTeX-compatible subset) |
+| `\` + special char | backslash escape: the next character loses its special inline meaning and renders literally, dropping the backslash. Covers the token openers (`#` `[` `(` `{`) and the formatting markers (`` ` `` `*` `~` `=` `$`) — so `\#tag` is plain text and `\$5` is a dollar amount, not math. Also suppresses autocomplete at the escaped trigger. A `\` before any other character stays literal, so `\\` and paths like `C:\Users` are untouched |
+
+Underscores are **not** emphasis: `_italic_` renders literally, a deliberate divergence from CommonMark so that `snake_case`, `file_name.md`, and the like are never mangled. Use `*` / `**` for emphasis.
 
 ### 5.2 Block-level syntax
 

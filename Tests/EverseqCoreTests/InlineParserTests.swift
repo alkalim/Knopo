@@ -21,6 +21,25 @@ import Foundation
         expectEqual(InlineParser.parse("((nope))"), [.text("((nope))")])
     }
 
+    @Test func backslashEscapesSpecials() {
+        // An escaped special renders as literal text — never a tag/ref/query.
+        expectEqual(InlineParser.parse("\\#foo"), [.text("#foo")])
+        expectEqual(InlineParser.parse("\\[[Page]]"), [.text("[[Page]]")])
+        expectEqual(
+            InlineParser.parse("\\((6f1c9e2a-3b4d-4c5e-8f90-1a2b3c4d5e6f))"),
+            [.text("((6f1c9e2a-3b4d-4c5e-8f90-1a2b3c4d5e6f))")])
+        expectEqual(InlineParser.parse("\\{{query (x)}}"), [.text("{{query (x)}}")])
+        // Formatting markers too: code, emphasis, and math.
+        expectEqual(InlineParser.parse("\\`code`"), [.text("`code`")])
+        expectEqual(InlineParser.parse("\\*not italic*"), [.text("*not italic*")])
+        expectEqual(InlineParser.parse("I have \\$5 and $10"), [.text("I have $5 and $10")])
+        // Unescaped still works; a backslash before an ordinary char is literal.
+        expectEqual(InlineParser.parse("#foo"), [.tag("foo")])
+        expectEqual(InlineParser.parse("a\\b"), [.text("a\\b")])
+        // The index side (RefExtractor) skips the escaped token, keeps the real one.
+        expectEqual(RefExtractor.extract(from: "\\#foo and #bar").tags, ["bar"])
+    }
+
     @Test func tags() {
         expectEqual(
             InlineParser.parse("a #Urgent b"),
