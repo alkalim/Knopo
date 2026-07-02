@@ -955,10 +955,13 @@ final class OutlineEditorController: NSObject {
 
     // MARK: - Commits
 
-    /// Structural ops record one undo entry against the session-start snapshot,
-    /// so a burst of keystrokes plus the op is a single undo step (SPEC §13).
+    /// Records a structural op as its own undo step. Any keystrokes typed since
+    /// the block was focused are first flushed into a *separate* undo step, so
+    /// undoing the op reverts only the op — not the typing that preceded it
+    /// (each Cmd+Z undoes one action, SPEC §13).
     private func commitStructural(_ doc: PageDocument, label: String) {
-        let before = editSessionBefore ?? app.document(for: pageName)
+        flushEditSessionUndo()
+        let before = app.document(for: pageName)
         app.commit(doc, undoLabel: label, before: before)
         editSessionBefore = doc
     }
