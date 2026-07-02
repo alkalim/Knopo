@@ -2,6 +2,21 @@
 
 Notable changes per release, newest first. Dates are release dates.
 
+## v0.2.1 (2026-07-02)
+
+Backslash escaping, editor and query refinements.
+
+**Added**
+- Backslash escaping: a `\` before a special character makes it literal and skips autocomplete, so `\#tag` is plain text and `\$5` a dollar amount, not math.
+
+**Changed**
+- Query results list journal days newest-first.
+- Undo reverts a single action at a time: typing is no longer folded into the following structural edit, so one `⌘Z` no longer wipes out more than you expect.
+
+**Fixed**
+- Escaped tokens no longer highlight as live tags/refs in the focused editor.
+- Clicking the blank space after a wrapped link's last line no longer opens the link.
+
 ## v0.2.0 (2026-07-01)
 
 Multi-graph windows, a native Back/Forward control, and visual polish.
