@@ -371,26 +371,28 @@ final class BlockEditorTextView: NSTextView {
                  fontStyle: .bold),
             rule("^[A-Za-z][\\w-]*:: ", [.foregroundColor: NSColor.tertiaryLabelColor],
                  options: [.anchorsMatchLines]),
-            // Inline grammar (SPEC §5.1).
-            rule("\\*\\*[^\\n]+?\\*\\*", [:], fontStyle: .bold),
-            rule("(?<![\\*\\w])\\*[^\\*\\n]+\\*(?![\\*\\w])",
+            // Inline grammar (SPEC §5.1). A leading `(?<!\\)` keeps a backslash-
+            // escaped opener (`\#`, `\[[`, `` \` ``, `\*`, …) from highlighting,
+            // matching how the rendered view treats the escape (§5.1).
+            rule("(?<!\\\\)\\*\\*[^\\n]+?\\*\\*", [:], fontStyle: .bold),
+            rule("(?<![\\*\\w\\\\])\\*[^\\*\\n]+\\*(?![\\*\\w])",
                  [.obliqueness: 0.18]),
-            rule("~~[^~\\n]+~~",
+            rule("(?<!\\\\)~~[^~\\n]+~~",
                  [.strikethroughStyle: NSUnderlineStyle.single.rawValue]),
-            rule("==[^=\\n]+==",
+            rule("(?<!\\\\)==[^=\\n]+==",
                  [.backgroundColor: NSColor.systemYellow.withAlphaComponent(0.3)]),
-            rule("`[^`\\n]+`",
+            rule("(?<!\\\\)`[^`\\n]+`",
                  [.backgroundColor: NSColor.quaternarySystemFill,
                   .foregroundColor: NSColor.systemOrange],
                  fontStyle: .mono),
-            rule("\\[[^\\]\\n]*\\]\\([^)\\n]*\\)", [.foregroundColor: NSColor.linkColor]),
-            rule("\\[\\[[^\\[\\]\\n]+\\]\\]",
+            rule("(?<!\\\\)\\[[^\\]\\n]*\\]\\([^)\\n]*\\)", [.foregroundColor: NSColor.linkColor]),
+            rule("(?<!\\\\)\\[\\[[^\\[\\]\\n]+\\]\\]",
                  [.foregroundColor: NSColor.controlAccentColor]),
-            rule("\\(\\([0-9a-fA-F-]{36}\\)\\)",
+            rule("(?<!\\\\)\\(\\([0-9a-fA-F-]{36}\\)\\)",
                  [.foregroundColor: NSColor.systemTeal,
                   .underlineStyle: NSUnderlineStyle.single.rawValue
                       | NSUnderlineStyle.patternDot.rawValue]),
-            rule("(?<![\\w#])#(?:\\[\\[[^\\[\\]\\n]+\\]\\]|[\\w-]+)",
+            rule("(?<![\\w#\\\\])#(?:\\[\\[[^\\[\\]\\n]+\\]\\]|[\\w-]+)",
                  [.foregroundColor: NSColor.systemPurple]),
         ].compactMap { $0 }
     }()
