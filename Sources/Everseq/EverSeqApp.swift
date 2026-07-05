@@ -75,6 +75,9 @@ final class GraphManager: ObservableObject {
         - Your notes live as plain Markdown files in `pages/` and `journals/` — nothing is held hostage.
         - Try the basics:
           - Type `[[` to link to a page — like [[Ideas]] (links to pages that don't exist yet create *stubs*).
+          - Type `((` to search blocks and insert a durable `((block-id))` reference.
+          - Use embeds to show read-only content in place: `{{embed [[Page]]}}` embeds a page, `{{embed ((block-id))}}` embeds a block subtree.
+          - Type `/` at a word start for slash commands like `/today`, `/link`, `/code-block`, `/page-embed`, and `/block-embed`.
           - Type `#` to add a tag, like #getting-started.
           - `Enter` makes a new block, `Tab` indents, `Shift+Tab` outdents.
           - Click a bullet to zoom into a block; click the triangle to fold.
