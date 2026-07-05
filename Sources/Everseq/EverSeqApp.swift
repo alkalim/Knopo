@@ -155,6 +155,10 @@ struct EverseqApp: App {
             WindowRoot(manager: manager)
                 .frame(minWidth: 900, minHeight: 560)
         }
+        // Open at the remembered size so the window doesn't flash a default
+        // size and then resize to the restored frame. (Position is still
+        // restored by WindowConfigurator.)
+        .defaultSize(WindowConfigurator.savedFrame()?.size ?? CGSize(width: 1100, height: 720))
         .commands {
             // All graph-scoped actions target whichever window is focused.
             GraphCommands()
@@ -296,6 +300,16 @@ private struct GraphView: View {
 /// SwiftUI's automatic autosave: that key is derived from the (private, nested)
 /// `RootView`'s mangled type name, which embeds a per-launch pointer — so it
 /// changes every launch and never restores.
+/// An `NSView` that reports when it's added to a window — the earliest hook to
+/// position the window before its first display (avoiding a reposition flash).
+private final class WindowHookView: NSView {
+    var onWindow: ((NSWindow) -> Void)?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window { onWindow?(window) }
+    }
+}
+
 private struct WindowConfigurator: NSViewRepresentable {
     let graphName: String   // == window.title (set by navigationTitle)
     let pageTitle: String
@@ -303,6 +317,18 @@ private struct WindowConfigurator: NSViewRepresentable {
     /// Posted when a window's graph/page changes or a window closes, so every
     /// tab re-decides whether to graph-qualify its title.
     private static let windowsChanged = Notification.Name("everseqWindowsChanged")
+
+    /// The last saved window frame, if present, valid, and on an attached
+    /// screen. Used both to restore the frame and to seed the WindowGroup's
+    /// default size so the window opens at the remembered size (no resize flash).
+    static func savedFrame() -> NSRect? {
+        guard let saved = UserDefaults.standard.string(forKey: frameKey) else { return nil }
+        let rect = NSRectFromString(saved)
+        guard rect.width >= 200, rect.height >= 200,
+              NSScreen.screens.contains(where: { $0.visibleFrame.intersects(rect) })
+        else { return nil }
+        return rect
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -332,8 +358,12 @@ private struct WindowConfigurator: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { configure(view.window, context.coordinator) }
+        // Restore the frame the moment the view enters its window — before the
+        // window is first displayed — so the saved position is set without a
+        // visible reposition. `updateNSView`'s deferred configure is a fallback.
+        let view = WindowHookView()
+        let coordinator = context.coordinator
+        view.onWindow = { [self] window in configure(window, coordinator) }
         return view
     }
 
@@ -367,13 +397,8 @@ private struct WindowConfigurator: NSViewRepresentable {
         // Window → Move Tab to New Window.
         window.tabbingMode = .preferred
         window.tabbingIdentifier = "everseq"
-        if let saved = UserDefaults.standard.string(forKey: Self.frameKey) {
-            let rect = NSRectFromString(saved)
-            // Ignore junk / off-screen frames (e.g. an unplugged display).
-            if rect.width >= 200, rect.height >= 200,
-               NSScreen.screens.contains(where: { $0.visibleFrame.intersects(rect) }) {
-                window.setFrame(rect, display: true)
-            }
+        if let rect = Self.savedFrame() {
+            window.setFrame(rect, display: true)
         }
         let save: (Notification) -> Void = { _ in
             UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.frameKey)
