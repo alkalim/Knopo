@@ -8,7 +8,7 @@ import Foundation
     @Test func layoutFieldsRoundTrip() throws {
         var config = GraphConfig()
         config.rightPanes = ["page\tIdeas\t", "tag\tproject", "journalHome"]
-        config.rightPaneWidth = 360
+        config.rightPaneFraction = 0.4
 
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("everseq-cfg-\(UUID().uuidString)/config.json")
@@ -16,7 +16,7 @@ import Foundation
         let loaded = GraphConfig.load(from: url)
 
         expectEqual(loaded.rightPanes, config.rightPanes)
-        expectEqual(loaded.rightPaneWidth, 360)
+        expectEqual(loaded.rightPaneFraction, 0.4)
     }
 
     /// An older config file (no layout keys) still loads, with defaults — the
@@ -35,6 +35,6 @@ import Foundation
         expectEqual(loaded.favourites, ["Home"])
         expectEqual(loaded.theme, "dark")
         expectTrue(loaded.rightPanes.isEmpty)
-        expectTrue(loaded.rightPaneWidth == nil)
+        expectTrue(loaded.rightPaneFraction == nil)
     }
 }

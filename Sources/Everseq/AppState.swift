@@ -240,8 +240,8 @@ final class AppState: ObservableObject {
         try? store.updateConfig { $0.rightPanes = encoded }
     }
 
-    func persistRightPaneWidth(_ width: CGFloat?) {
-        try? store.updateConfig { $0.rightPaneWidth = width.map(Double.init) }
+    func persistRightPaneFraction(_ fraction: CGFloat?) {
+        try? store.updateConfig { $0.rightPaneFraction = fraction.map(Double.init) }
     }
 
     // MARK: - Derived lists (sidebar)

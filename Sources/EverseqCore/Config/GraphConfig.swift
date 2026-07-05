@@ -16,13 +16,15 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     /// Encoded `NavTarget`s for the open panes (newest first); the app layer
     /// owns the encoding — the config just stores the opaque strings.
     public var rightPanes: [String] = []
-    /// User-dragged right-sidebar width in points; nil → proportional default.
-    public var rightPaneWidth: Double?
+    /// User-dragged right-sidebar width as a fraction (0–1) of the detail area,
+    /// so it scales with the window and restores at any window size; nil →
+    /// proportional default. (Replaces the old points-based `rightPaneWidth`.)
+    public var rightPaneFraction: Double?
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case favourites, favouriteTags, dateFormat, theme, rightPanes, rightPaneWidth
+        case favourites, favouriteTags, dateFormat, theme, rightPanes, rightPaneFraction
     }
 
     // Decode field-by-field so older config files (predating a field) still
@@ -34,7 +36,7 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         dateFormat = try c.decodeIfPresent(String.self, forKey: .dateFormat) ?? "MMM d'th', yyyy"
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
         rightPanes = try c.decodeIfPresent([String].self, forKey: .rightPanes) ?? []
-        rightPaneWidth = try c.decodeIfPresent(Double.self, forKey: .rightPaneWidth)
+        rightPaneFraction = try c.decodeIfPresent(Double.self, forKey: .rightPaneFraction)
     }
 
     public static func load(from url: URL) -> GraphConfig {

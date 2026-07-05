@@ -5,10 +5,11 @@ struct MainWindow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var nav: Navigator
 
-    /// User-set width of the right-sidebar panel. Nil until the divider is
-    /// dragged — until then the panel uses a proportional default that adapts
-    /// to window width (so it doesn't open uselessly narrow on a wide window).
-    @State private var rightWidthManual: CGFloat?
+    /// User-set right-sidebar width as a fraction (0–1) of the detail area. Nil
+    /// until the divider is dragged (or a saved fraction is restored) — until
+    /// then a proportional default is used. Storing a fraction (not points)
+    /// makes it scale with the window and restore correctly at any window size.
+    @State private var rightFraction: CGFloat?
     @State private var dragStartWidth: CGFloat?
 
     private let mainMinWidth: CGFloat = 320
@@ -76,19 +77,22 @@ struct MainWindow: View {
                 .environmentObject(nav)
         }
         .onAppear {
-            // Restore the saved right-sidebar width for this graph (§12).
-            if rightWidthManual == nil, let saved = app.store.config.rightPaneWidth {
-                rightWidthManual = CGFloat(saved)
+            // Restore the saved right-sidebar width fraction for this graph (§12).
+            if rightFraction == nil, let saved = app.store.config.rightPaneFraction {
+                rightFraction = CGFloat(saved)
             }
         }
     }
 
-    /// Panel width: the user's dragged width, or ~40% of the detail area
-    /// (capped) until they resize — clamped so the main view keeps its minimum.
+    /// Panel width: the saved fraction of the detail area (so it scales with the
+    /// window — both panels shrink/grow proportionally), or ~40% capped until the
+    /// user drags. Once the main view is down to its useable minimum, only the
+    /// panel keeps shrinking (below its own preferred minimum; a small hard floor
+    /// keeps it renderable).
     private func rightWidth(available: CGFloat) -> CGFloat {
-        let maxRight = max(rightMinWidth, available - mainMinWidth)
-        let proportionalDefault = min(max(available * 0.4, rightMinWidth), 520)
-        let desired = rightWidthManual ?? proportionalDefault
+        let desired = rightFraction.map { $0 * available }
+            ?? min(max(available * 0.4, rightMinWidth), 520)
+        let maxRight = max(120, available - mainMinWidth)
         return min(max(desired, rightMinWidth), maxRight)
     }
 
@@ -118,12 +122,15 @@ struct MainWindow: View {
                                 if dragStartWidth == nil { dragStartWidth = base }
                                 let maxRight = max(rightMinWidth, available - mainMinWidth)
                                 // Dragging left (negative translation) grows the panel.
-                                rightWidthManual = min(max(base - value.translation.width,
-                                                          rightMinWidth), maxRight)
+                                let width = min(max(base - value.translation.width,
+                                                    rightMinWidth), maxRight)
+                                // Store as a fraction of the current width, so
+                                // later window resizes scale the panel with it.
+                                rightFraction = available > 0 ? width / available : nil
                             }
                             .onEnded { _ in
                                 dragStartWidth = nil
-                                app.persistRightPaneWidth(rightWidthManual)
+                                app.persistRightPaneFraction(rightFraction)
                             }
                     )
             )
