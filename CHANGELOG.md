@@ -2,6 +2,22 @@
 
 Notable changes per release, newest first. Dates are release dates.
 
+## v0.2.3 (2026-07-07)
+
+Query pages by their properties, with editor and navigation fixes.
+
+**Added**
+- Query by page property: `{{query type:: person}}` now lists pages by their page properties (the un-bulleted `key:: value` lines at the top of a page), including pages that have only properties and no bullets. Matches appear as clickable page names.
+- `[[` page-link autocomplete ranks closer matches first, so the page you are typing is not buried under looser fuzzy matches.
+
+**Improved**
+- Page properties at the top of a page render dimmed, like properties, instead of as plain text.
+
+**Fixed**
+- Links to pages whose names contain a slash (e.g. `Test/Page1`) open the correct page instead of an empty stub.
+- Focusing a block no longer leaves a stale selection highlight, and a selection no longer spans multiple pages or panes at once.
+- Completing a `[[` link no longer leaves a stray space before a following comma, period, or colon.
+
 ## v0.2.2 (2026-07-06)
 
 Editor and window refinements.
