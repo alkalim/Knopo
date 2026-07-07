@@ -134,6 +134,15 @@ final class BlockEditorTextView: NSTextView {
         let pendingSpaceCaret = pendingTrailingSpaceCaret
         pendingTrailingSpaceCaret = nil
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // The auto-space after a `[[Page]]` completion helps when the next thing
+        // is a word, but not when it's closing punctuation — drop it so the mark
+        // sits against the reference ("[[Page]]," not "[[Page]] ,"). `super`
+        // then types the punctuation at the reclaimed caret.
+        if let spaceCaret = pendingSpaceCaret,
+           flags.isSubset(of: [.shift]),
+           let chars = event.characters, chars.count == 1, ",.;:!?".contains(chars) {
+            removePendingTrailingSpace(at: spaceCaret)
+        }
         switch event.keyCode {
         case 36, 76: // Return / keypad Enter
             if flags.contains(.command) {
