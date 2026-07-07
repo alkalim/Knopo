@@ -150,12 +150,18 @@ enum EverseqURL {
     /// Decodes an internal or external URL into a navigation action.
     static func decode(_ url: URL) -> NavTarget? {
         guard url.scheme == "everseq" else { return nil }
-        let value = url.lastPathComponent.removingPercentEncoding ?? url.lastPathComponent
+        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        // Decode from the *percent-encoded* path: a namespaced name like
+        // "Test/Page1" encodes its `/` as `%2F`, and `url.lastPathComponent`
+        // would decode that back into a separator and return just "Page1",
+        // opening the wrong (stub) page.
+        let rawPath = comps?.percentEncodedPath ?? ""
+        let stripped = rawPath.hasPrefix("/") ? String(rawPath.dropFirst()) : rawPath
+        let value = stripped.removingPercentEncoding ?? stripped
         switch url.host {
         case "page":
             // `everseq://page/<name>?block=<uuid>` zooms into that block.
-            if let item = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "block" }),
+            if let item = comps?.queryItems?.first(where: { $0.name == "block" }),
                let raw = item.value, let id = UUID(uuidString: raw) {
                 return .page(name: value, zoom: id)
             }
