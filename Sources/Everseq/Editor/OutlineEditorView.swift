@@ -592,6 +592,10 @@ final class OutlineEditorController: NSObject {
                     .foregroundColor: NSColor.secondaryLabelColor,
                     .link: EverseqURL.page(hit.pageDisplayName)]))
             }
+            // An empty block (e.g. a page-properties block surfaced by a
+            // page-property query) has nothing to show; the clickable page header
+            // above already lists the page, so skip the blank bullet row.
+            if hit.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
             let row = NSMutableAttributedString(
                 string: "    ", attributes: [.font: BlockRenderer.baseFont()])
             row.append(Self.embedBullet())
