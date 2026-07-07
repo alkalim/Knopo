@@ -39,14 +39,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Release notes come from this tag's section in CHANGELOG.md; fall
-          # back to auto-generated notes if there's no matching section.
+          # Release notes come from this tag's section in CHANGELOG.md.
           awk -v tag="$GITHUB_REF_NAME" '
             $0 ~ "^## " tag "( |$)" { flag=1; next }
             flag && /^## / { exit }
             flag { print }
           ' CHANGELOG.md > release-notes.md
-          if [ -s release-notes.md ]; then NOTES=(--notes-file release-notes.md); else NOTES=(--generate-notes); fi
+          # Append the same Gatekeeper note to every release: the build is
+          # unsigned/un-notarized, so macOS quarantines it and users must clear
+          # the flag before it will open.
+          cat >> release-notes.md <<'EOF'
+
+          ---
+
+          ### Opening Everseq the first time
+
+          Everseq isn't code-signed or notarized yet, so macOS quarantines the download and refuses to open it. After unzipping and moving `Everseq.app` into Applications, open the Terminal (Applications ▸ Utilities ▸ Terminal) and run this command to clear the quarantine flag:
+
+          ```sh
+          xattr -dr com.apple.quarantine /Applications/Everseq.app
+          ```
+
+          Then open the app normally. (Adjust the path if you keep the app elsewhere.)
+          EOF
           gh release create "$GITHUB_REF_NAME" "$ZIP" \
-            --title "$GITHUB_REF_NAME" "${NOTES[@]}" \
+            --title "$GITHUB_REF_NAME" --notes-file release-notes.md \
           || gh release upload "$GITHUB_REF_NAME" "$ZIP" --clobber
