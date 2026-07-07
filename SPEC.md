@@ -265,7 +265,7 @@ A block can carry a background color, rendered as a soft rounded box behind its 
 
 ### 6.1 Syntax and behavior
 
-- Typing `[[` opens an autocomplete popup listing pages by fuzzy match on name, ordered by recency of access, including an option to create a new page with the typed text.
+- Typing `[[` opens an autocomplete popup listing pages by fuzzy match on name, ranked by match closeness (exact → prefix → substring → loose subsequence) then recency of access, including an option to create a new page with the typed text.
 - A committed reference is stored literally as `[[Page Name]]` in the block's Markdown.
 - Rendered as a link; click navigates to the page. `Cmd+Click` opens it in the right sidebar.
 - Referencing a non-existent page creates a **stub** (see §3.2) — navigable, shows linked references, gets a file only once content is added.

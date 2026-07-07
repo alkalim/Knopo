@@ -303,16 +303,34 @@ final class AppState: ObservableObject {
         let recencyRank: [String: Int] = Dictionary(
             uniqueKeysWithValues: recentKeys.enumerated().map { ($1, $0) }
         )
-        let filtered = query.isEmpty
-            ? pages
-            : pages.filter { fuzzyMatch(query: query, in: $0) }
-        return filtered.sorted { a, b in
-            let ra = recencyRank[PageName.key(a)] ?? Int.max
-            let rb = recencyRank[PageName.key(b)] ?? Int.max
-            if ra != rb { return ra < rb }
-            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        func recency(_ name: String) -> Int { recencyRank[PageName.key(name)] ?? Int.max }
+        if query.isEmpty {
+            return pages.sorted { a, b in
+                let ra = recency(a), rb = recency(b)
+                return ra != rb ? ra < rb : a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+            }
         }
+        // Rank by match closeness first (exact → prefix → substring → loose
+        // subsequence), then recency, then alphabetically — so the page you
+        // typed doesn't sit below more-distant fuzzy matches.
+        return pages.compactMap { name in matchTier(query: query, in: name).map { (name, $0) } }
+            .sorted { a, b in
+                if a.1 != b.1 { return a.1 < b.1 }
+                let ra = recency(a.0), rb = recency(b.0)
+                return ra != rb ? ra < rb : a.0.localizedCaseInsensitiveCompare(b.0) == .orderedAscending
+            }
+            .map(\.0)
     }
+}
+
+/// Match closeness of `query` against `candidate`, case-insensitive; nil if no
+/// match. Lower is closer: 0 exact, 1 prefix, 2 substring, 3 loose subsequence.
+func matchTier(query: String, in candidate: String) -> Int? {
+    let q = query.lowercased(), c = candidate.lowercased()
+    if c == q { return 0 }
+    if c.hasPrefix(q) { return 1 }
+    if c.contains(q) { return 2 }
+    return fuzzyMatch(query: q, in: c) ? 3 : nil
 }
 
 /// Subsequence fuzzy match, case-insensitive.
