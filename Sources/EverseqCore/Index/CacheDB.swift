@@ -53,7 +53,7 @@ public final class CacheDB {
     /// existing cache, whose rows were derived by older code, is force-rebuilt
     /// on next open. v2: recognize Logseq `yyyy_MM_dd` journal filenames.
     /// v3: canonicalize date page keys to ISO (cross-spelling journal refs).
-    public static let indexVersion: Int = 3
+    public static let indexVersion: Int = 4
 
     /// The index version this cache was last built with (PRAGMA user_version,
     /// independent of the schema migrator). 0 on a fresh/old database.
@@ -155,6 +155,20 @@ public final class CacheDB {
         migrator.registerMigration("v2-props-key") { db in
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS props_key ON props(key);")
         }
+        // Page properties (§4.2): un-bulleted `key:: value` preamble lines. Kept
+        // page-scoped (not attached to any block) so a query matches them via the
+        // page's first block without conflating them with block properties.
+        migrator.registerMigration("v3-page-props") { db in
+            try db.execute(sql: """
+                CREATE TABLE page_props (
+                    page_key TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE INDEX page_props_page ON page_props(page_key);
+                CREATE INDEX page_props_key ON page_props(key);
+                """)
+        }
         try migrator.migrate(dbQueue)
     }
 
@@ -254,6 +268,17 @@ public final class CacheDB {
                 }
             }
             try walk(page.blocks, parent: nil, depth: 0)
+            // Preamble page properties (un-bulleted `key:: value` lines, the
+            // Logseq convention) are page-scoped: stored on their own, not on any
+            // block. `{{query key:: value}}` matches them via the page's first
+            // block (see `compile`), surfacing the page without polluting block
+            // properties. The preamble text itself round-trips untouched.
+            for prop in page.preambleProperties {
+                try db.execute(
+                    sql: "INSERT INTO page_props (page_key, key, value) VALUES (?, ?, ?)",
+                    arguments: [key, prop.key, prop.value]
+                )
+            }
         }
     }
 
@@ -272,6 +297,7 @@ public final class CacheDB {
         try db.execute(sql: "DELETE FROM block_refs WHERE page_key = ?", arguments: [key])
         try db.execute(sql: "DELETE FROM tags WHERE page_key = ?", arguments: [key])
         try db.execute(sql: "DELETE FROM props WHERE page_key = ?", arguments: [key])
+        try db.execute(sql: "DELETE FROM page_props WHERE page_key = ?", arguments: [key])
     }
 
     public func fileStamp(forPageKey key: String) throws -> FileStamp? {
@@ -289,7 +315,7 @@ public final class CacheDB {
 
     public func clearAll() throws {
         try dbQueue.write { db in
-            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props"] {
+            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
@@ -530,8 +556,10 @@ public final class CacheDB {
             whereSQL += " AND b.id <> ?"
             whereArgs.append(excluded.uuidString.lowercased())
         }
+        let pagePred = Self.compilePage(expr)
         return try dbQueue.read { db in
-            let total = try Int.fetchOne(
+            // Block-level matches.
+            let blockTotal = try Int.fetchOne(
                 db, sql: "SELECT COUNT(*) FROM blocks b WHERE \(whereSQL)",
                 arguments: StatementArguments(whereArgs)) ?? 0
             let rows = try Row.fetchAll(db, sql: """
@@ -545,7 +573,7 @@ public final class CacheDB {
                          b.position, b.content
                 LIMIT ?
                 """, arguments: StatementArguments(whereArgs + [limit]))
-            let hits = try rows.compactMap { row -> BacklinkHit? in
+            var hits = try rows.compactMap { row -> BacklinkHit? in
                 guard let uuid = UUID(uuidString: row["id"]) else { return nil }
                 return BacklinkHit(
                     blockID: uuid,
@@ -554,7 +582,37 @@ public final class CacheDB {
                     content: row["content"],
                     breadcrumb: try Self.breadcrumb(db, blockID: row["id"]))
             }
-            return (hits, total)
+            var seenPages = Set(hits.map(\.pageKey))
+
+            // Page-level matches: pages that satisfy a pure page-property query
+            // via their preamble properties. These surface the page itself — even
+            // one with no blocks (the Logseq page-properties layout) — so a
+            // `{{query type:: person}}` lists every person page. A page already
+            // present as a block hit isn't repeated.
+            var pageTotal = 0
+            if let pagePred {
+                let pageRows = try Row.fetchAll(db, sql: """
+                    SELECT p.name_key, p.display_name
+                    FROM pages p
+                    WHERE (\(pagePred.sql)) AND p.file_exists = 1
+                    ORDER BY p.journal_date DESC, p.display_name COLLATE NOCASE
+                    """, arguments: StatementArguments(pagePred.args))
+                for row in pageRows {
+                    let key: String = row["name_key"]
+                    guard !seenPages.contains(key) else { continue }
+                    seenPages.insert(key)
+                    pageTotal += 1
+                    if hits.count < limit {
+                        hits.append(BacklinkHit(
+                            blockID: Self.pageHitBlockID,
+                            pageKey: key,
+                            pageDisplayName: row["display_name"],
+                            content: "",
+                            breadcrumb: []))
+                    }
+                }
+            }
+            return (hits, blockTotal + pageTotal)
         }
     }
 
@@ -586,11 +644,47 @@ public final class CacheDB {
             // for task-less blocks — otherwise `(not DONE)` would drop them.
             return ("(b.todo IS NOT NULL AND b.todo IN (\(marks)))", states.map { $0.rawValue })
         case .property(let key, let value):
+            // A block's *own* property. Page properties (preamble `key:: value`,
+            // which may belong to a page with no blocks at all) are matched
+            // separately at the page level — see `compilePage` / `runQuery`.
             if let value {
                 return ("EXISTS (SELECT 1 FROM props x WHERE x.block_id = b.id AND x.key = ? AND x.value = ?)",
                         [key, value])
             }
             return ("EXISTS (SELECT 1 FROM props x WHERE x.block_id = b.id AND x.key = ?)", [key])
+        }
+    }
+
+    /// Sentinel block id for a *page-level* query hit — a page surfaced by a
+    /// page-property match rather than a specific block. Such a hit carries empty
+    /// content and renders as the page's name, so this id is never navigated to.
+    static let pageHitBlockID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
+    /// Compiles the *page-level* reading of a query: which pages match purely by
+    /// their page properties (preamble `key:: value` lines). Returns nil unless
+    /// the query is built solely from property terms (with `and`/`or`) — anything
+    /// block-specific (tags, refs, tasks, `not`) can't be decided from page
+    /// properties alone, so those queries yield block matches only.
+    private static func compilePage(_ expr: QueryExpr) -> (sql: String, args: [DatabaseValueConvertible])? {
+        switch expr {
+        case .property(let key, let value):
+            if let value {
+                return ("EXISTS (SELECT 1 FROM page_props pp WHERE pp.page_key = p.name_key AND pp.key = ? AND pp.value = ?)",
+                        [key, value])
+            }
+            return ("EXISTS (SELECT 1 FROM page_props pp WHERE pp.page_key = p.name_key AND pp.key = ?)", [key])
+        case .and(let subs):
+            let parts = subs.map(compilePage)
+            guard !parts.isEmpty, parts.allSatisfy({ $0 != nil }) else { return nil }
+            let ps = parts.compactMap { $0 }
+            return ("(" + ps.map(\.sql).joined(separator: " AND ") + ")", ps.flatMap(\.args))
+        case .or(let subs):
+            let parts = subs.map(compilePage)
+            guard !parts.isEmpty, parts.allSatisfy({ $0 != nil }) else { return nil }
+            let ps = parts.compactMap { $0 }
+            return ("(" + ps.map(\.sql).joined(separator: " OR ") + ")", ps.flatMap(\.args))
+        case .not, .tag, .pageRef, .task:
+            return nil
         }
     }
 

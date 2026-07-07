@@ -41,6 +41,14 @@ public struct PageDocument: Identifiable, Sendable {
         blocks.first?.properties ?? []
     }
 
+    /// Properties written in the preamble — un-bulleted `key:: value` lines
+    /// before the first block (the Logseq page-property convention). Indexed
+    /// alongside the first block's own properties so they're queryable; the
+    /// preamble text itself round-trips untouched. Non-property lines are ignored.
+    public var preambleProperties: [BlockProperty] {
+        preamble.components(separatedBy: "\n").compactMap(PageParser.matchProperty)
+    }
+
     /// `title::` overrides the display name. (SPEC §4.2)
     public var displayTitle: String {
         if let t = pageProperties.first(where: { $0.key == "title" })?.value,

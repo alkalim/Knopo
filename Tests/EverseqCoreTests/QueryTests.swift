@@ -141,6 +141,47 @@ import Foundation
         expectEqual(try run(store, "status::").total, 1) // exists
     }
 
+    @Test func preamblePagePropertyIsQueryable() throws {
+        // A page property in the preamble (Logseq style) surfaces the page as a
+        // page-level result (empty content → rendered as the page name).
+        let store = try makeGraph([
+            "Alpha": "type:: project\n- the actual content\n",
+            "Beta": "- unrelated\n",
+        ])
+        let r = try run(store, "type:: project")
+        expectEqual(r.total, 1)
+        expectEqual(r.hits.first?.pageDisplayName, "Alpha")
+        expectTrue(r.hits.first?.content.isEmpty == true)
+    }
+
+    @Test func pageWithNoBlocksMatchesByPageProperty() throws {
+        // A properties-only page (the Logseq page-properties layout: no bullets
+        // at all) is surfaced by a page-property query even with zero blocks.
+        let store = try makeGraph([
+            "Ann":  "type:: person\nname:: Ann\n",         // no blocks
+            "Bob":  "type:: person\n- met at the conf\n",  // preamble prop + a block
+            "Note": "- just a note\n",                     // unrelated
+        ])
+        let r = try run(store, "type:: person")
+        expectEqual(r.total, 2)
+        expectEqual(Set(r.hits.map(\.pageDisplayName)), Set(["Ann", "Bob"]))
+        expectTrue(r.hits.allSatisfy { $0.content.isEmpty }) // page results, not blocks
+    }
+
+    @Test func pageAndBlockPropertiesStaySeparate() throws {
+        // A preamble page property (`open`) and a same-key block property with a
+        // different value (`closed`) aren't conflated: the page property surfaces
+        // the page, the block property matches the block that owns it.
+        let store = try makeGraph([
+            "Alpha": "status:: open\n- first\n  status:: closed\n- second\n",
+        ])
+        let open = try run(store, "status:: open")
+        expectEqual(open.hits.map(\.pageDisplayName), ["Alpha"]) // page prop → the page
+        expectTrue(open.hits.first?.content.isEmpty == true)
+        expectEqual(try run(store, "status:: closed").hits.map(\.content), ["first"]) // block prop → its owner
+        expectEqual(try run(store, "status:: pending").total, 0)                      // neither
+    }
+
     @Test func notAndOr() throws {
         let store = try graph()
         // #work but not done → both work blocks are TODO/none, so 2.
