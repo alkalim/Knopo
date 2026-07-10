@@ -426,9 +426,16 @@ final class BlockEditorTextView: NSTextView {
             return true
         }
         // Inside a code block, multi-line text stays in the block verbatim —
-        // splitting it would let lines "escape" the fence (§5.5.1).
+        // splitting it would let lines "escape" the fence (§5.5.1). Same for a
+        // quote block: it is one multi-line block by design (§5.2), so pasted
+        // lines become continuation lines instead of separate blocks.
+        let isQuote: Bool = {
+            if case .quote = BlockKind.classify(string) { return true }
+            return false
+        }()
         if let text = pasteboard.string(forType: .string),
            text.contains("\n"),
+           !isQuote,
            !BlockKind.caretInsideFence(string, utf16Caret: selectedRange().location) {
             actions?.editorPasteBlocks(text)
             return true
