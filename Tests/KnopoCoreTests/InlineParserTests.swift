@@ -93,6 +93,95 @@ import Foundation
         )
     }
 
+    @Test func pipeImageSizes() {
+        expectEqual(
+            InlineParser.parse("![a|363](x.png)"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(width: 363))]
+        )
+        expectEqual(
+            InlineParser.parse("![a|640x480](x.png)"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(width: 640, height: 480))]
+        )
+        expectEqual(
+            InlineParser.parse("![cat|photo](x.png)"),
+            [.image(alt: "cat|photo", src: "x.png")]
+        )
+        expectEqual(
+            InlineParser.parse("![|363](x.png)"),
+            [.image(alt: "", src: "x.png", size: ImageSize(width: 363))]
+        )
+        expectEqual(InlineParser.plainText(InlineParser.parse("![a|363](x.png)")), "a")
+    }
+
+    @Test func logseqImageSizes() {
+        expectEqual(
+            InlineParser.parse("![a](x.png){:height 239, :width 363}"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(width: 363, height: 239))]
+        )
+        expectEqual(
+            InlineParser.parse("![a](x.png){:width 363, :height 239}"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(width: 363, height: 239))]
+        )
+        expectEqual(
+            InlineParser.parse("![a](x.png){:width 363}"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(width: 363))]
+        )
+        expectEqual(
+            InlineParser.parse("![a](x.png){:height 239}"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(height: 239))]
+        )
+        expectEqual(
+            InlineParser.parse("![a](x.png){:foo 1}"),
+            [.image(alt: "a", src: "x.png"), .text("{:foo 1}")]
+        )
+        expectEqual(
+            InlineParser.parse("![a](x.png)\n{:width 363}"),
+            [.image(alt: "a", src: "x.png"), .lineBreak, .text("{:width 363}")]
+        )
+        // Pipe form controls the size, but a valid Logseq suffix is still consumed.
+        expectEqual(
+            InlineParser.parse("![a|100](x.png){:width 363}"),
+            [.image(alt: "a", src: "x.png", size: ImageSize(width: 100))]
+        )
+    }
+
+    @Test func settingImageWidth() {
+        let three = "![one](1.png) x ![two](2.png) y ![three](3.png)"
+        expectEqual(
+            InlineParser.settingImageWidth(three, imageIndex: 1, width: 275),
+            "![one](1.png) x ![two|275](2.png) y ![three](3.png)"
+        )
+        expectEqual(
+            InlineParser.settingImageWidth("![a|100](x.png)", imageIndex: 0, width: 220),
+            "![a|220](x.png)"
+        )
+        expectEqual(
+            InlineParser.settingImageWidth(
+                "![a](x.png){:height 239, :width 363}", imageIndex: 0, width: 300),
+            "![a|300](x.png)"
+        )
+        expectEqual(
+            InlineParser.settingImageWidth("![a](x.png)", imageIndex: 0, width: 180),
+            "![a|180](x.png)"
+        )
+        expectEqual(
+            InlineParser.settingImageWidth("![a|180](x.png)", imageIndex: 0, width: nil),
+            "![a](x.png)"
+        )
+        expectEqual(
+            InlineParser.settingImageWidth(
+                "![a](x.png){:width 180, :height 90}", imageIndex: 0, width: nil),
+            "![a](x.png)"
+        )
+        expectNil(InlineParser.settingImageWidth(three, imageIndex: 3, width: 200))
+        // Opaque code content does not affect the renderer/source image ordinal.
+        expectEqual(
+            InlineParser.settingImageWidth("`![skip](x.png)` ![use](y.png)", imageIndex: 0,
+                                           width: 200),
+            "`![skip](x.png)` ![use|200](y.png)"
+        )
+    }
+
     /// Balanced parens inside a destination must not truncate the URL — Logseq
     /// asset names like `image_(3)_….png` were breaking the image (the first
     /// inner `)` ended the src early).

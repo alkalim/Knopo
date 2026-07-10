@@ -1,5 +1,15 @@
 import Foundation
 
+public struct ImageSize: Equatable, Sendable {
+    public var width: Int?
+    public var height: Int?
+
+    public init(width: Int? = nil, height: Int? = nil) {
+        self.width = width
+        self.height = height
+    }
+}
+
 /// Inline Markdown node tree for one block's content (SPEC §5.1).
 public indirect enum InlineNode: Equatable, Sendable {
     case text(String)
@@ -10,7 +20,7 @@ public indirect enum InlineNode: Equatable, Sendable {
     case code(String)
     case math(String)
     case link(label: String, url: String)
-    case image(alt: String, src: String)
+    case image(alt: String, src: String, size: ImageSize? = nil)
     case pageRef(String)
     case blockRef(UUID)
     /// Normalized (lowercased) tag name.
@@ -110,6 +120,108 @@ public enum InlineParser {
     /// token openers (`#` `[` `(` `{`) and the formatting markers
     /// (`` ` `` `*` `~` `=` `$`). Not `\` itself (so `\\` stays literal).
     static let escapable: Set<Character> = ["#", "[", "(", "{", "`", "*", "~", "=", "$"]
+
+    private struct ImageToken {
+        var start: Int
+        var end: Int
+        var alt: String
+        var src: String
+        var size: ImageSize?
+    }
+
+    private static func find(
+        _ close: [Character], in chars: [Character], from: Int, sameLine: Bool = true
+    ) -> Int? {
+        var index = from
+        while index + close.count <= chars.count {
+            if sameLine, chars[index] == "\n" { return nil }
+            if Array(chars[index..<index + close.count]) == close { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func findURLEnd(in chars: [Character], from: Int) -> Int? {
+        var depth = 0
+        var index = from
+        while index < chars.count {
+            switch chars[index] {
+            case "\n": return nil
+            case "(": depth += 1
+            case ")":
+                if depth == 0 { return index }
+                depth -= 1
+            default: break
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func pipeImageSize(in rawAlt: String) -> (alt: String, size: ImageSize?) {
+        guard let pipe = rawAlt.lastIndex(of: "|") else { return (rawAlt, nil) }
+        let tail = rawAlt[rawAlt.index(after: pipe)...]
+        func decimal(_ value: Substring) -> Int? {
+            guard !value.isEmpty,
+                  value.unicodeScalars.allSatisfy({ (48...57).contains(Int($0.value)) }) else {
+                return nil
+            }
+            return Int(value)
+        }
+        if let width = decimal(tail) {
+            return (String(rawAlt[..<pipe]), ImageSize(width: width))
+        }
+        let dimensions = tail.split(separator: "x", omittingEmptySubsequences: false)
+        if dimensions.count == 2,
+           let width = decimal(dimensions[0]), let height = decimal(dimensions[1]) {
+            return (String(rawAlt[..<pipe]), ImageSize(width: width, height: height))
+        }
+        return (rawAlt, nil)
+    }
+
+    /// Parses Logseq's `:width N, :height N` image-size map.
+    static func parseLogseqSize(_ inner: String) -> ImageSize? {
+        let fields = inner.split(separator: ",", omittingEmptySubsequences: false)
+        guard (1...2).contains(fields.count) else { return nil }
+        var width: Int?
+        var height: Int?
+        for field in fields {
+            let parts = field.split(whereSeparator: { $0.isWhitespace })
+            guard parts.count == 2,
+                  parts[1].unicodeScalars.allSatisfy({ (48...57).contains(Int($0.value)) }),
+                  let value = Int(parts[1]), value >= 1 else { return nil }
+            switch parts[0] {
+            case ":width" where width == nil: width = value
+            case ":height" where height == nil: height = value
+            default: return nil
+            }
+        }
+        guard width != nil || height != nil else { return nil }
+        return ImageSize(width: width, height: height)
+    }
+
+    private static func imageToken(in chars: [Character], at start: Int) -> ImageToken? {
+        guard start + 1 < chars.count, chars[start] == "!", chars[start + 1] == "[",
+              let altEnd = find(["]"], in: chars, from: start + 2),
+              altEnd + 1 < chars.count, chars[altEnd + 1] == "(",
+              let srcEnd = findURLEnd(in: chars, from: altEnd + 2) else { return nil }
+
+        let rawAlt = String(chars[start + 2..<altEnd])
+        let parsedAlt = pipeImageSize(in: rawAlt)
+        let src = String(chars[altEnd + 2..<srcEnd])
+        var end = srcEnd + 1
+        var logseqSize: ImageSize?
+        if end < chars.count, chars[end] == "{",
+           let suffixEnd = find(["}"], in: chars, from: end + 1),
+           let parsed = parseLogseqSize(String(chars[end + 1..<suffixEnd])) {
+            logseqSize = parsed
+            end = suffixEnd + 1
+        }
+        return ImageToken(
+            start: start, end: end, alt: parsedAlt.alt, src: src,
+            size: parsedAlt.size ?? logseqSize
+        )
+    }
 
     public static func parse(_ text: String) -> [InlineNode] {
         let chars = Array(text)
@@ -219,13 +331,10 @@ public enum InlineParser {
                 }
 
             case "!":
-                if i + 1 < chars.count, chars[i + 1] == "[",
-                   let altEnd = find(["]"], from: i + 2),
-                   altEnd + 1 < chars.count, chars[altEnd + 1] == "(",
-                   let srcEnd = findURLEnd(from: altEnd + 2) {
+                if let image = Self.imageToken(in: chars, at: i) {
                     flush()
-                    nodes.append(.image(alt: slice(i + 2, altEnd), src: slice(altEnd + 2, srcEnd)))
-                    i = srcEnd + 1
+                    nodes.append(.image(alt: image.alt, src: image.src, size: image.size))
+                    i = image.end
                 } else {
                     literal.append(c); i += 1
                 }
@@ -381,7 +490,7 @@ public enum InlineParser {
                 return plainText(n)
             case .code(let s), .math(let s): return s
             case .link(let label, _): return label
-            case .image(let alt, _): return alt
+            case .image(let alt, _, _): return alt
             case .pageRef(let name): return name
             case .blockRef: return "(…)"
             case .tag(let t): return "#" + t
@@ -389,5 +498,80 @@ public enum InlineParser {
             case .lineBreak: return "\n"
             }
         }.joined()
+    }
+
+    /// Rewrites the n-th parsed image token to the pipe width form, preserving
+    /// every character outside that token. A nil width removes either size form.
+    public static func settingImageWidth(
+        _ content: String, imageIndex: Int, width: Int?
+    ) -> String? {
+        guard imageIndex >= 0 else { return nil }
+        let chars = Array(content)
+        var images: [ImageToken] = []
+        var index = 0
+        while index < chars.count {
+            switch chars[index] {
+            case "\\":
+                if index + 1 < chars.count, escapable.contains(chars[index + 1]) {
+                    index += 2
+                } else {
+                    index += 1
+                }
+            case "`":
+                if let end = find(["`"], in: chars, from: index + 1), end > index + 1 {
+                    index = end + 1
+                } else {
+                    index += 1
+                }
+            case "$":
+                if let end = find(["$"], in: chars, from: index + 1), end > index + 1 {
+                    index = end + 1
+                } else {
+                    index += 1
+                }
+            case "[":
+                if index + 1 < chars.count, chars[index + 1] == "[",
+                   let end = find(["]", "]"], in: chars, from: index + 2),
+                   case let name = String(chars[index + 2..<end]),
+                   !name.isEmpty, !name.contains("["), !name.contains("]") {
+                    index = end + 2
+                } else if let labelEnd = find(["]"], in: chars, from: index + 1),
+                          labelEnd + 1 < chars.count, chars[labelEnd + 1] == "(",
+                          let urlEnd = findURLEnd(in: chars, from: labelEnd + 2) {
+                    index = urlEnd + 1
+                } else {
+                    index += 1
+                }
+            case "(":
+                if index + 1 < chars.count, chars[index + 1] == "(",
+                   let end = find([")", ")"], in: chars, from: index + 2),
+                   UUID(uuidString: String(chars[index + 2..<end])) != nil {
+                    index = end + 2
+                } else {
+                    index += 1
+                }
+            case "{":
+                if index + 1 < chars.count, chars[index + 1] == "{",
+                   let end = find(["}", "}"], in: chars, from: index + 2) {
+                    index = end + 2
+                } else {
+                    index += 1
+                }
+            case "!":
+                if let image = imageToken(in: chars, at: index) {
+                    images.append(image)
+                    index = image.end
+                } else {
+                    index += 1
+                }
+            default:
+                index += 1
+            }
+        }
+        guard images.indices.contains(imageIndex) else { return nil }
+        let image = images[imageIndex]
+        let sizedAlt = width.map { "\(image.alt)|\($0)" } ?? image.alt
+        let replacement = "![\(sizedAlt)](\(image.src))"
+        return String(chars[..<image.start]) + replacement + String(chars[image.end...])
     }
 }

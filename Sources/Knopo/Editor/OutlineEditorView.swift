@@ -1202,6 +1202,9 @@ final class OutlineEditorController: NSObject {
             },
             beginDrag: { [weak self] event, view in
                 self?.beginDragSession(for: id, event: event, from: view)
+            },
+            resizeImage: { [weak self] imageIndex, width in
+                self?.resizeImage(id, imageIndex: imageIndex, width: width)
             }
         )
     }
@@ -1232,6 +1235,19 @@ final class OutlineEditorController: NSObject {
         let rest = String(block.content.dropFirst(state.rawValue.count))
         doc.blocks.update(at: path) { $0.content = state.toggled.rawValue + rest }
         app.commit(doc, undoLabel: state == .todo ? "Mark Done" : "Mark Todo")
+        reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
+            ? editor.selectedRange() : nil)
+    }
+
+    private func resizeImage(_ id: UUID, imageIndex: Int, width: CGFloat) {
+        var doc = app.document(for: pageName)
+        guard let path = doc.blocks.path(to: id),
+              let block = doc.blocks.block(at: path),
+              let content = InlineParser.settingImageWidth(
+                block.content, imageIndex: imageIndex, width: Int(width.rounded())
+              ) else { return }
+        doc.blocks.update(at: path) { $0.content = content }
+        app.commit(doc, undoLabel: "Resize Image")
         reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
             ? editor.selectedRange() : nil)
     }

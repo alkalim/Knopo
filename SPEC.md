@@ -151,7 +151,7 @@ Rules:
 | `` `code` `` | inline code |
 | `==highlight==` | highlighted text |
 | `[label](url)` | external link — underlined and marked with a trailing ↗ to distinguish it from internal references; opens in system browser |
-| `![alt](path-or-url)` | inline image; relative paths resolve against `<graph-root>/assets/` |
+| `![alt](path-or-url)` | inline image; relative paths resolve against `<graph-root>/assets/`. Display sizes accept Obsidian's `![alt\|W](src)` / `![alt\|WxH](src)` and Logseq's `![alt](src){:height H, :width W}` suffix (either dimension may appear alone). Knopo emits the pipe form when resizing |
 | `[[Page Name]]` | page reference (§6), rendered in the accent color. **Display vs. identity:** the link *target* is the literal name in the file, but the rendered *text* is the page's display title — a date reference like `[[2026-06-10]]` shows as "Jun 10th, 2026". Faint `[[ ]]` brackets around the name are an optional per-app viewing preference (off by default), not stored in the file |
 | `((uuid))` | block reference (§7) |
 | `#tag`, `#[[multi word tag]]` | tag chip (§8) |
@@ -190,6 +190,7 @@ Tables (GitHub style) render read-only inside a block; editing happens in raw so
 - Clicking a bullet **zooms** into that block (it becomes the temporary page root, with a breadcrumb back). Clicking the fold triangle toggles `collapsed`. An empty leaf block hides its bullet while unfocused (the gutter is kept, so nothing shifts).
 - **Dragging a bullet** moves the block (with subtree): dropping between rows inserts it as the sibling before the row below the gap; dropping onto a row inserts it as that block's first child (expanding it if collapsed). Dragging a bullet inside the node selection moves the whole selection; drops into a dragged subtree are rejected. Blocks keep their ids across drops, so block references stay intact. Same-page only for now.
 - **Dragging image files from Finder** copies them into `assets/` and inserts one `![name](file)` block per image using the same drop geometry as bullet drags; dropping onto a collapsed block expands it. Hovering any drag over a collapsed block for a moment **spring-loads** it open (like Finder folders), so the drop can target the blocks inside. Pasting copied image files inserts their Markdown at the caret. Pasting bitmap data does the same only when the clipboard has no text, so text remains the preferred paste representation.
+- **Resizing images**: hovering an image shows a width handle on its right edge. Dragging it horizontally changes the width while preserving the image's natural aspect ratio (with a dashed outline and size badge during the drag), then rewrites the token as `![alt|W](src)` in one undo step. Resizing a Logseq-sized image converts its `{…}` suffix to the pipe form.
 
 ### 5.5 Slash commands
 

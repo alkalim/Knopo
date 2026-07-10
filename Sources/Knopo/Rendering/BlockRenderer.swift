@@ -107,6 +107,9 @@ enum BlockRenderer {
     /// rounded pill behind it (an attributed `.backgroundColor` is a tight,
     /// square rect with no breathing room).
     static let inlineCodeKey = NSAttributedString.Key("knopoInlineCode")
+    /// Ordinal of an image token within one top-level block render. Attached to
+    /// the object-replacement character so the row view can rewrite its source.
+    static let imageIndexKey = NSAttributedString.Key("knopoImageIndex")
 
     /// Inline-code glyph color: a dark grey (not pure body-text black) so it
     /// reads as distinct on the code pill. Adapts to light/dark.
@@ -235,7 +238,8 @@ enum BlockRenderer {
     }
 
     static func render(content: String, context: Context) -> NSAttributedString {
-        let body = renderBody(content: content, context: context)
+        var imageIndex = 0
+        let body = renderBody(content: content, context: context, imageIndex: &imageIndex)
         guard let mutable = body.mutableCopy() as? NSMutableAttributedString else { return body }
         shrinkEmoji(mutable, scale: emojiScale)
         pinLineHeight(mutable, lineHeight(forSource: content), lineSpacing: lineSpacing)
@@ -262,7 +266,9 @@ enum BlockRenderer {
         for (range, font) in edits { string.addAttribute(.font, value: font, range: range) }
     }
 
-    private static func renderBody(content: String, context: Context) -> NSAttributedString {
+    private static func renderBody(
+        content: String, context: Context, imageIndex: inout Int
+    ) -> NSAttributedString {
         let kind = BlockKind.classify(content)
         switch kind {
         case .horizontalRule:
@@ -287,7 +293,8 @@ enum BlockRenderer {
             ]))
             return out
         case .heading(let level, let text):
-            return inline(text, baseFont: headingFont(level: level), context: context)
+            return inline(text, baseFont: headingFont(level: level), context: context,
+                          imageIndex: &imageIndex)
         case .quote(let text):
             // Every line gets the quote bar; continuation lines may carry
             // their own `> ` marker (stripped) or none (Shift+Enter).
@@ -312,7 +319,8 @@ enum BlockRenderer {
                     line,
                     baseFont: baseFont(italic: true),
                     baseColor: .secondaryLabelColor,
-                    context: context
+                    context: context,
+                    imageIndex: &imageIndex
                 ))
             }
             if !context.inlineQuoteBar {
@@ -343,7 +351,8 @@ enum BlockRenderer {
                 baseFont: baseFont(),
                 baseColor: todo == .done ? .secondaryLabelColor : bodyColor,
                 strikethrough: false,
-                context: context
+                context: context,
+                imageIndex: &imageIndex
             )
             out.append(body)
             return out
@@ -357,12 +366,14 @@ enum BlockRenderer {
         baseFont: NSFont,
         baseColor: NSColor = .textColor,
         strikethrough: Bool = false,
-        context: Context
+        context: Context,
+        imageIndex: inout Int
     ) -> NSAttributedString {
         let nodes = InlineParser.parse(text)
         let out = NSMutableAttributedString()
         appendNodes(nodes, to: out, font: baseFont, color: baseColor,
-                    strike: strikethrough, highlight: false, context: context)
+                    strike: strikethrough, highlight: false, context: context,
+                    imageIndex: &imageIndex)
         return out
     }
 
@@ -373,7 +384,8 @@ enum BlockRenderer {
         color: NSColor,
         strike: Bool,
         highlight: Bool,
-        context: Context
+        context: Context,
+        imageIndex: inout Int
     ) {
         func attrs(_ extra: [NSAttributedString.Key: Any] = [:]) -> [NSAttributedString.Key: Any] {
             var a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
@@ -391,16 +403,20 @@ enum BlockRenderer {
                 out.append(NSAttributedString(string: "\n", attributes: attrs()))
             case .bold(let inner):
                 appendNodes(inner, to: out, font: withTrait(font, .bold), color: color,
-                            strike: strike, highlight: highlight, context: context)
+                            strike: strike, highlight: highlight, context: context,
+                            imageIndex: &imageIndex)
             case .italic(let inner):
                 appendNodes(inner, to: out, font: withTrait(font, .italic), color: color,
-                            strike: strike, highlight: highlight, context: context)
+                            strike: strike, highlight: highlight, context: context,
+                            imageIndex: &imageIndex)
             case .strike(let inner):
                 appendNodes(inner, to: out, font: font, color: color,
-                            strike: true, highlight: highlight, context: context)
+                            strike: true, highlight: highlight, context: context,
+                            imageIndex: &imageIndex)
             case .highlight(let inner):
                 appendNodes(inner, to: out, font: font, color: color,
-                            strike: strike, highlight: true, context: context)
+                            strike: strike, highlight: true, context: context,
+                            imageIndex: &imageIndex)
             case .code(let s):
                 // Thin spaces give the pill *real* horizontal padding that takes
                 // part in layout — painting the pill wider than the glyphs would
@@ -440,8 +456,11 @@ enum BlockRenderer {
                     .foregroundColor: NSColor.linkColor,
                     .font: NSFont.systemFont(ofSize: font.pointSize - 2),
                 ])))
-            case .image(let alt, let src):
-                appendImage(alt: alt, src: src, attrs: attrs(), to: out, context: context)
+            case .image(let alt, let src, let size):
+                let index = imageIndex
+                imageIndex += 1
+                appendImage(alt: alt, src: src, size: size, imageIndex: index,
+                            attrs: attrs(), to: out, context: context)
             case .pageRef(let name):
                 // Display the page's title while the link target keeps the
                 // literal (stable) name: a date reference like `2026-06-10`
@@ -536,7 +555,7 @@ enum BlockRenderer {
     }
 
     private static func appendImage(
-        alt: String, src: String,
+        alt: String, src: String, size explicitSize: ImageSize?, imageIndex: Int,
         attrs: [NSAttributedString.Key: Any],
         to out: NSMutableAttributedString,
         context: Context
@@ -552,13 +571,31 @@ enum BlockRenderer {
         if let url, url.isFileURL, let image = NSImage(contentsOf: url) {
             let attachment = NSTextAttachment()
             attachment.image = image
-            let maxWidth: CGFloat = 420
-            let size = image.size
-            let scale = size.width > maxWidth ? maxWidth / size.width : 1
-            attachment.bounds = CGRect(
-                x: 0, y: 0, width: size.width * scale, height: size.height * scale
+            let natural = NSSize(width: max(image.size.width, 1), height: max(image.size.height, 1))
+            let boundsSize: NSSize
+            switch (explicitSize?.width, explicitSize?.height) {
+            case let (width?, height?):
+                boundsSize = NSSize(width: max(CGFloat(width), 8),
+                                    height: max(CGFloat(height), 8))
+            case let (width?, nil):
+                let targetWidth = max(CGFloat(width), 8)
+                boundsSize = NSSize(width: targetWidth,
+                                    height: max(targetWidth * natural.height / natural.width, 8))
+            case let (nil, height?):
+                let targetHeight = max(CGFloat(height), 8)
+                boundsSize = NSSize(width: max(targetHeight * natural.width / natural.height, 8),
+                                    height: targetHeight)
+            case (nil, nil):
+                let scale = natural.width > 420 ? 420 / natural.width : 1
+                boundsSize = NSSize(width: natural.width * scale, height: natural.height * scale)
+            }
+            attachment.bounds = CGRect(origin: .zero, size: boundsSize)
+            let rendered = NSMutableAttributedString(attachment: attachment)
+            rendered.addAttribute(
+                imageIndexKey, value: imageIndex,
+                range: NSRange(location: 0, length: rendered.length)
             )
-            out.append(NSAttributedString(attachment: attachment))
+            out.append(rendered)
         } else {
             var linkAttrs = attrs
             linkAttrs[.foregroundColor] = NSColor.linkColor

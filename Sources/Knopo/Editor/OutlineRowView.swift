@@ -17,6 +17,8 @@ struct OutlineRowCallbacks {
     var pagePreview: (String) -> NSAttributedString? = { _ in nil }
     /// Bullet drag: starts a block-move drag session (event, source view).
     var beginDrag: (NSEvent, NSView) -> Void = { _, _ in }
+    /// Resizes the n-th image token in this block to the given display width.
+    var resizeImage: (_ imageIndex: Int, _ width: CGFloat) -> Void = { _, _ in }
 }
 
 /// One outline row (SPEC §5.4): indentation by depth, fold triangle, bullet
@@ -105,6 +107,9 @@ final class OutlineRowCell: NSTableCellView {
             self?.showPreview(forPage: name, near: rect)
         }
         renderedView.onHoverEnded = { [weak self] in self?.closePreview() }
+        renderedView.onImageResize = { [weak self] index, width in
+            self?.callbacks.resizeImage(index, width)
+        }
         // Backgrounds sit behind the text so a code/embed block reads as one
         // filled box (full content width, no per-line gaps). The color box is
         // furthest back so it tints the whole block (incl. when focused/editing).
@@ -174,6 +179,7 @@ final class OutlineRowCell: NSTableCellView {
         // transcluded line fragments, not the whole cell).
         embedBackground.isHidden = true
         renderedView.textStorage?.setAttributedString(attributed)
+        renderedView.renderedContentDidChange()
         // TextKit 2 repaints the glyphs on its own layout path without calling
         // the view's draw(), so the inline-code pills (drawn there) would keep
         // stale pixels — or never appear — after an in-place content update.
@@ -426,10 +432,20 @@ final class RenderedTextView: NSTextView {
     var onSelectRequest: (_ extend: Bool, _ toggle: Bool) -> Void = { _, _ in }
     var onHoverPageLink: (String, NSRect) -> Void = { _, _ in }
     var onHoverEnded: () -> Void = {}
+    var onImageResize: (_ imageIndex: Int, _ width: CGFloat) -> Void = { _, _ in }
 
     private var hoverWork: DispatchWorkItem?
     private var hoverRange: NSRange?
     private var hoverArea: NSTrackingArea?
+    private var hoverImageIndex: Int?
+    /// Reach of the right-edge width handle around the image's trailing edge.
+    private static let imageHandleInnerReach: CGFloat = 12
+    private static let imageHandleOuterSlop: CGFloat = 4
+    /// Resize affordances (handle bar, drag outline, size badge) draw in this
+    /// overlay, NOT in `draw(_:)`: TextKit 2 renders text and attachments in
+    /// fragment subviews layered above the view's own drawing, so anything
+    /// painted there ends up *behind* the images.
+    private let resizeOverlay = ImageResizeOverlayView()
 
     static func create() -> RenderedTextView {
         let view = RenderedTextView(usingTextLayoutManager: true)
@@ -445,7 +461,22 @@ final class RenderedTextView: NSTextView {
         view.autoresizingMask = [.width, .height]
         view.linkTextAttributes = [.cursor: NSCursor.pointingHand]
         view.delegate = view
+        view.resizeOverlay.frame = view.bounds
+        view.resizeOverlay.autoresizingMask = [.width, .height]
+        view.addSubview(view.resizeOverlay)
         return view
+    }
+
+    /// TextKit 2 inserts its fragment views as subviews on demand; keep the
+    /// affordance overlay above them whenever it has something to show.
+    private func updateResizeOverlay(
+        hoverFrame: NSRect?, preview: ImageResizeOverlayView.Preview?
+    ) {
+        resizeOverlay.hoverFrame = hoverFrame
+        resizeOverlay.preview = preview
+        if hoverFrame != nil || preview != nil, subviews.last !== resizeOverlay {
+            addSubview(resizeOverlay, positioned: .above, relativeTo: nil)
+        }
     }
 
     // MARK: Inline-code pill
@@ -499,6 +530,11 @@ final class RenderedTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        let imageHit = imageHandle(at: point)
+        if let image = imageHit {
+            trackImageResize(from: event, image: image)
+            return
+        }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let wantsSidebar = flags.contains(.command) || flags.contains(.shift)
         // Handle link clicks directly: deferring to super lets a selectable
@@ -516,6 +552,174 @@ final class RenderedTextView: NSTextView {
         // Anything else (including empty space inside a query/embed region)
         // focuses the block, so a query block can still be clicked to edit.
         onFocusRequest(characterIndexForInsertion(at: point))
+    }
+
+    private func imageHandle(at point: NSPoint) -> (index: Int, frame: NSRect)? {
+        imageHit(at: point) { imageHandleRect(for: $0).contains(point) }
+    }
+
+    private func image(at point: NSPoint) -> (index: Int, frame: NSRect)? {
+        imageHit(at: point) { $0.contains(point) }
+    }
+
+    /// Finds attachments by their rendered frames instead of asking TextKit for
+    /// an insertion index. At attachment edges that index can alternate between
+    /// the image and the neighboring character, making a small resize handle
+    /// effectively disappear under a stationary pointer.
+    private func imageHit(
+        at point: NSPoint, where contains: (NSRect) -> Bool
+    ) -> (index: Int, frame: NSRect)? {
+        guard let storage = textStorage, storage.length > 0 else { return nil }
+        var hits: [(index: Int, frame: NSRect)] = []
+        storage.enumerateAttribute(
+            BlockRenderer.imageIndexKey,
+            in: NSRange(location: 0, length: storage.length)
+        ) { value, range, _ in
+            guard let index = value as? Int,
+                  storage.attribute(.embedRegion, at: range.location, effectiveRange: nil) == nil,
+                  let frame = imageFrame(at: range.location), contains(frame) else { return }
+            hits.append((index, frame))
+        }
+        // Expanded handle targets can overlap for adjacent small images. The
+        // nearest right edge is the one the pointer is aiming at.
+        return hits.min {
+            hypot(point.x - $0.frame.maxX, point.y - $0.frame.midY)
+                < hypot(point.x - $1.frame.maxX, point.y - $1.frame.midY)
+        }
+    }
+
+    /// The grab zone for the width handle: a strip along the image's right
+    /// edge, full height — matching the vertical handle bar the overlay draws.
+    private func imageHandleRect(for frame: NSRect) -> NSRect {
+        let reach = min(Self.imageHandleInnerReach, frame.width / 2)
+        return NSRect(
+            x: frame.maxX - reach,
+            y: frame.minY,
+            width: reach + Self.imageHandleOuterSlop,
+            height: frame.height
+        )
+    }
+
+    private func imageFrame(for imageIndex: Int) -> NSRect? {
+        guard let storage = textStorage, storage.length > 0 else { return nil }
+        var characterIndex: Int?
+        storage.enumerateAttribute(
+            BlockRenderer.imageIndexKey,
+            in: NSRange(location: 0, length: storage.length)
+        ) { value, range, stop in
+            guard value as? Int == imageIndex,
+                  storage.attribute(.embedRegion, at: range.location, effectiveRange: nil) == nil
+            else { return }
+            characterIndex = range.location
+            stop.pointee = true
+        }
+        return characterIndex.flatMap(imageFrame(at:))
+    }
+
+    private func imageFrame(at characterIndex: Int) -> NSRect? {
+        guard let manager = textLayoutManager, let storage = textContentStorage,
+              let start = storage.location(
+                storage.documentRange.location, offsetBy: characterIndex
+              ),
+              let end = storage.location(start, offsetBy: 1),
+              let range = NSTextRange(location: start, end: end) else { return nil }
+        let attachmentBounds = (textStorage?.attribute(
+            .attachment, at: characterIndex, effectiveRange: nil
+        ) as? NSTextAttachment)?.bounds
+        manager.ensureLayout(for: range)
+        let origin = textContainerOrigin
+        var result: NSRect?
+        manager.enumerateTextSegments(in: range, type: .standard, options: []) { _, frame, _, _ in
+            guard frame.width > 0, frame.height > 0 else { return true }
+            let segment = frame.offsetBy(dx: origin.x, dy: origin.y)
+            if let bounds = attachmentBounds, bounds.width > 0, bounds.height > 0 {
+                // A segment spans the line's tallest attachment. Pin this image
+                // to the segment bottom using its own bounds, so mixed-size
+                // images get handles on their actual corners.
+                result = NSRect(
+                    x: segment.minX + bounds.minX,
+                    y: segment.maxY - bounds.height - bounds.minY,
+                    width: bounds.width, height: bounds.height
+                )
+            } else {
+                result = segment
+            }
+            return false
+        }
+        return result
+    }
+
+    private func naturalImageSize(for imageIndex: Int) -> NSSize? {
+        guard let storage = textStorage, storage.length > 0 else { return nil }
+        var result: NSSize?
+        storage.enumerateAttribute(
+            BlockRenderer.imageIndexKey,
+            in: NSRange(location: 0, length: storage.length)
+        ) { value, range, stop in
+            guard value as? Int == imageIndex,
+                  storage.attribute(.embedRegion, at: range.location, effectiveRange: nil) == nil,
+                  let attachment = storage.attribute(
+                    .attachment, at: range.location, effectiveRange: nil
+                  ) as? NSTextAttachment,
+                  let image = attachment.image else { return }
+            result = image.size
+            stop.pointee = true
+        }
+        return result
+    }
+
+    func renderedContentDidChange() {
+        hoverImageIndex = nil
+        updateResizeOverlay(hoverFrame: nil, preview: nil)
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard let storage = textStorage, storage.length > 0 else { return }
+        storage.enumerateAttribute(
+            BlockRenderer.imageIndexKey,
+            in: NSRange(location: 0, length: storage.length)
+        ) { value, range, _ in
+            guard value != nil,
+                  storage.attribute(.embedRegion, at: range.location, effectiveRange: nil) == nil,
+                  let frame = imageFrame(at: range.location) else { return }
+            let cursorRect = imageHandleRect(for: frame).intersection(bounds)
+            if !cursorRect.isEmpty {
+                addCursorRect(cursorRect, cursor: .resizeLeftRight)
+            }
+        }
+    }
+
+    private func trackImageResize(
+        from startEvent: NSEvent, image: (index: Int, frame: NSRect)
+    ) {
+        guard let window, let natural = naturalImageSize(for: image.index),
+              natural.width > 0, natural.height > 0 else { return }
+        let start = convert(startEvent.locationInWindow, from: nil)
+        let aspect = natural.height / natural.width
+        let maximum = max(40, natural.width * 4)
+        var width = image.frame.width
+
+        while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if event.type == .leftMouseDragged {
+                let point = convert(event.locationInWindow, from: nil)
+                width = min(max(image.frame.width + point.x - start.x, 40), maximum)
+                let height = width * aspect
+                updateResizeOverlay(
+                    hoverFrame: nil,
+                    preview: ImageResizeOverlayView.Preview(
+                        frame: NSRect(x: image.frame.minX, y: image.frame.minY,
+                                      width: width, height: height),
+                        width: Int(width.rounded()), height: Int(height.rounded())
+                    )
+                )
+            } else {
+                updateResizeOverlay(hoverFrame: nil, preview: nil)
+                onImageResize(image.index, width.rounded())
+                return
+            }
+        }
     }
 
     private func linkValue(at point: NSPoint) -> URL? {
@@ -597,6 +801,26 @@ final class RenderedTextView: NSTextView {
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
+        let handle = imageHandle(at: point)
+        let hoveredImage = handle ?? image(at: point)
+        if hoverImageIndex != hoveredImage?.index {
+            hoverImageIndex = hoveredImage?.index
+            updateResizeOverlay(hoverFrame: hoveredImage?.frame, preview: nil)
+        }
+        if handle != nil {
+            NSCursor.resizeLeftRight.set()
+            cancelHover()
+            onHoverEnded()
+            return
+        }
+        if hoveredImage != nil {
+            NSCursor.arrow.set()
+            cancelHover()
+            onHoverEnded()
+            return
+        }
+        if linkValue(at: point) != nil { NSCursor.pointingHand.set() }
+        else { NSCursor.arrow.set() }
         guard let (name, range) = pageLink(at: point) else {
             cancelHover()
             onHoverEnded()
@@ -617,6 +841,9 @@ final class RenderedTextView: NSTextView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        hoverImageIndex = nil
+        updateResizeOverlay(hoverFrame: nil, preview: nil)
+        NSCursor.arrow.set()
         cancelHover()
         onHoverEnded()
     }
@@ -780,6 +1007,86 @@ final class BulletView: NSView {
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
+// MARK: - Image-resize overlay
+
+/// Transparent top layer for the image width-handle, drag outline, and size
+/// badge. Lives above TextKit 2's fragment subviews (which render the text and
+/// image attachments), so the affordances draw over the images — painting them
+/// in the text view's own `draw(_:)` puts them underneath. Never intercepts
+/// events.
+final class ImageResizeOverlayView: NSView {
+
+    struct Preview: Equatable {
+        var frame: NSRect
+        var width: Int
+        var height: Int
+    }
+
+    /// Hovered image frame: draws the vertical width-handle bar on its right
+    /// edge (width-only resize, matching the horizontal resize cursor).
+    var hoverFrame: NSRect? {
+        didSet { if hoverFrame != oldValue { needsDisplay = true } }
+    }
+    /// Live drag state: dashed target outline and a "W × H" badge.
+    var preview: Preview? {
+        didSet { if preview != oldValue { needsDisplay = true } }
+    }
+
+    override var isFlipped: Bool { true }  // match the host text view
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if let frame = hoverFrame, preview == nil {
+            drawHandleBar(on: frame)
+        }
+        guard let preview else { return }
+        let outline = NSBezierPath(rect: preview.frame.insetBy(dx: 0.5, dy: 0.5))
+        outline.lineWidth = 1
+        outline.setLineDash([4, 3], count: 2, phase: 0)
+        NSColor.controlAccentColor.setStroke()
+        outline.stroke()
+        drawBadge("\(preview.width) × \(preview.height)", for: preview.frame)
+    }
+
+    /// A rounded vertical bar just inside the image's right edge (the Notion
+    /// convention for width handles) — dark fill with a light border so it
+    /// reads on any image content.
+    private func drawHandleBar(on frame: NSRect) {
+        let height = min(36, max(12, frame.height * 0.4))
+        let bar = NSRect(
+            x: frame.maxX - 9, y: frame.midY - height / 2, width: 6, height: height
+        )
+        let path = NSBezierPath(roundedRect: bar, xRadius: 3, yRadius: 3)
+        NSColor.black.withAlphaComponent(0.5).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.9).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    private func drawBadge(_ label: String, for frame: NSRect) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let labelSize = (label as NSString).size(withAttributes: attributes)
+        let badgeSize = NSSize(width: ceil(labelSize.width) + 10,
+                               height: ceil(labelSize.height) + 6)
+        let badge = NSRect(
+            x: max(bounds.minX + 2,
+                   min(frame.maxX - badgeSize.width, bounds.maxX - badgeSize.width - 2)),
+            y: frame.minY + 4,
+            width: badgeSize.width, height: badgeSize.height
+        )
+        NSColor.black.withAlphaComponent(0.72).setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4).fill()
+        (label as NSString).draw(
+            at: NSPoint(x: badge.minX + 5, y: badge.minY + 3), withAttributes: attributes
+        )
     }
 }
 

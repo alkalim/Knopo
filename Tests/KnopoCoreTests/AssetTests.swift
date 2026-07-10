@@ -107,7 +107,7 @@ import Foundation
         let markdown = GraphStore.imageMarkdown(assetNamed: "Dark_blue_theme_ex._1.jpg")
         let nodes = InlineParser.parse(markdown)
         expectEqual(nodes.count, 1)
-        guard case .image(let alt, let src) = nodes.first else {
+        guard case .image(let alt, let src, nil) = nodes.first else {
             Issue.record("expected .image node, got \(nodes)")
             return
         }

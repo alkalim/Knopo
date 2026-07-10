@@ -143,6 +143,15 @@ import Foundation
         assertRoundTrip("- {{query (and [[a]] [[b]])}}\n")
     }
 
+    @Test func imageSizeSyntaxRoundTripsLiterally() {
+        assertRoundTrip("""
+        - ![pipe|363](../assets/pipe.png)
+        - ![dimensions|640x480](../assets/dimensions.png)
+        - ![logseq](../assets/logseq.png){:height 239, :width 363}
+
+        """)
+    }
+
     @Test func unknownPropertiesRoundTrip() {
         let text = "- block\n  custom:: some value\n  another:: x\n"
         assertRoundTrip(text)
