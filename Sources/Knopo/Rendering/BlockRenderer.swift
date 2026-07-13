@@ -152,11 +152,51 @@ enum BlockRenderer {
     static var lineSpacing: CGFloat { 6 * zoom * density }
     /// Emoji render this much smaller than surrounding text.
     static let emojiScale: CGFloat = 0.9
-    /// TODO/DONE checkbox glyphs render this much larger than the text.
-    static let todoBoxScale: CGFloat = 1.33
-    /// Negative baseline offset nudges the checkbox down to sit centered on
-    /// the text line (the glyph otherwise rides high).
-    static let todoBoxBaselineOffset: CGFloat = -1.5
+    /// The TODO/DONE checkbox, drawn as a text attachment with exact bounds so
+    /// it fits inside the pinned line box. The previous oversized `☐` glyph
+    /// (1.33× the text font) had an ascent taller than the line: it pushed the
+    /// first line's baseline down (misaligning the bullet), hung below the
+    /// text band, and grew the row height past the pinned metrics.
+    static func todoCheckbox(done: Bool) -> NSAttributedString {
+        let font = baseFont()
+        let side = (font.capHeight * 1.3).rounded()
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
+            let color: NSColor = done ? .secondaryLabelColor : .controlAccentColor
+            let box = NSBezierPath(
+                roundedRect: NSRect(x: 0.75, y: 0.75, width: side - 1.5, height: side - 1.5),
+                xRadius: 2.5, yRadius: 2.5
+            )
+            box.lineWidth = 1.4
+            color.setStroke()
+            box.stroke()
+            if done {
+                let check = NSBezierPath()
+                check.move(to: NSPoint(x: side * 0.26, y: side * 0.52))
+                check.line(to: NSPoint(x: side * 0.43, y: side * 0.32))
+                check.line(to: NSPoint(x: side * 0.75, y: side * 0.70))
+                check.lineWidth = 1.5
+                check.lineCapStyle = .round
+                check.lineJoinStyle = .round
+                check.stroke()
+            }
+            return true
+        }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // Centered on the cap-height band: bottom edge a hair under the
+        // baseline, top well inside the font's ascent — the line keeps its
+        // pinned height.
+        attachment.bounds = CGRect(
+            x: 0, y: ((font.capHeight - side) / 2).rounded(), width: side, height: side
+        )
+        let out = NSMutableAttributedString(attachment: attachment)
+        out.append(NSAttributedString(string: " ", attributes: [.font: font]))
+        out.addAttribute(
+            .link, value: URL(string: "knopo://toggle-todo")!,
+            range: NSRange(location: 0, length: out.length)
+        )
+        return out
+    }
 
     /// Shared with the raw-source editor so heading rows keep their size when
     /// focused (no height "vibration" between edit and rendered modes).
@@ -337,14 +377,7 @@ enum BlockRenderer {
         case .paragraph(let text, let todo):
             let out = NSMutableAttributedString()
             if let todo {
-                let box = todo == .done ? "☑ " : "☐ "
-                out.append(NSAttributedString(string: box, attributes: [
-                    .font: NSFont.systemFont(ofSize: baseFontSize * todoBoxScale),
-                    .baselineOffset: todoBoxBaselineOffset,
-                    .foregroundColor: todo == .done
-                        ? NSColor.secondaryLabelColor : NSColor.controlAccentColor,
-                    .link: URL(string: "knopo://toggle-todo")!,
-                ]))
+                out.append(todoCheckbox(done: todo == .done))
             }
             let body = inline(
                 text,
