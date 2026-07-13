@@ -485,13 +485,13 @@ A `{{query …}}` block renders a **read-only, live result list** of the blocks 
 
 - **Syntax — two equivalent surfaces.** Shorthand, with bare filters implicitly AND-ed (`{{query #urgent TODO [[Project X]]}}`); and structured s-expressions for composition (`{{query (and #urgent (not DONE) (or #a #b))}}`).
 - **Filters:** `#tag`, `[[Page]]` (links-to), task state (`TODO` / `DONE`, or `(task TODO DONE)`), and properties (`key:: value`, `key::` for exists, or `(property "key" "value")`), combined with `and` / `or` / `not`.
-- **Rendering.** Results render **in place inside the host block**, in document order among the page's other blocks — the same generated, read-only, grouped-by-page machinery as embeds (§7.6) and the tag view (§8.2): each result a bulleted, click-to-navigate row. Capped (50) with a "showing N of M" footer; the query never lists its own host block.
+- **Rendering.** Results render **in place inside the host block**, in document order among the page's other blocks — the same generated, read-only, grouped-by-page machinery as embeds (§7.6) and the tag view (§8.2): each result a bulleted, click-to-navigate row. Capped (50) with a "showing N of M" footer; the query never lists its own host block. A result's `TODO`/`DONE` checkbox toggles the **source** block in place (one undo step; likewise for checkboxes inside embeds) — clicking anywhere else on the row still navigates. A block that stops matching drops from the results on the next re-evaluation.
 - **Editing & round-trip.** The host block stays editable: focused shows the raw `{{query …}}`, unfocused shows results. A malformed query renders literally and round-trips byte-stably (§4.2). Query criteria do **not** count as the host block's own references (no backlink pollution).
 - **Evaluation.** Queries are pure functions of the `cache.db` index, compiled to parameterized SQL over its facet tables; re-evaluated when the index changes.
 
 ### 17.2 Deferred to later phases
 
-Scope filters (`in-page` / `descendant-of`), journal-date ranges, output controls (`:sort` / `:group` / `:limit`), table rendering, inline TODO toggling from results, and saved/named queries as navigable "query pages".
+Scope filters (`in-page` / `descendant-of`), journal-date ranges, output controls (`:sort` / `:group` / `:limit`), table rendering, and saved/named queries as navigable "query pages".
 
 ### Binding commitments (unchanged)
 

@@ -235,7 +235,15 @@ public final class GraphStore {
         }
         if let hit = (try? cache.locateBlock(id)) ?? nil {
             let doc = page(named: (try? cache.page(key: hit.pageKey))?.displayName ?? hit.pageKey)
-            if let path = doc.blocks.path(to: id), let block = doc.blocks.block(at: path) {
+            // Direct id match (a persisted `id::`), else relocate by the index's
+            // preorder position: an un-persisted block gets a fresh random id on
+            // every parse, so the index id won't match this freshly-loaded page
+            // (SPEC §7.1). Same idiom as `persistBlockID`.
+            var path = doc.blocks.path(to: id)
+            if path == nil, let position = (try? cache.position(ofBlock: id)) ?? nil {
+                path = doc.blocks.path(atPreorderPosition: position)
+            }
+            if let path, let block = doc.blocks.block(at: path) {
                 return (doc.name, block)
             }
         }

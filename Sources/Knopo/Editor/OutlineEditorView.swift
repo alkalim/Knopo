@@ -403,9 +403,21 @@ final class OutlineEditorController: NSObject {
     private func refreshIfChanged() {
         let doc = app.document(for: pageName)
         let fresh = OutlineOps.visibleRows(in: doc.blocks, zoomRoot: zoom)
-        guard !matchesCurrent(fresh) else { return }
-        reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
-            ? editor.selectedRange() : nil)
+        if !matchesCurrent(fresh) {
+            reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
+                ? editor.selectedRange() : nil)
+            return
+        }
+        // This page's own blocks are unchanged — but a `{{query}}` / `{{embed}}`
+        // renders from the *index* (other pages), so its results can change with
+        // no change here: e.g. a TODO toggled in another pane or window. Re-run
+        // those blocks on any data change, unless an edit is in progress here (a
+        // reload would re-attach the editor and drop the caret).
+        guard focusedBlockID == nil else { return }
+        let hasGenerated = fresh.contains {
+            $0.block.content.contains("{{query") || $0.block.content.contains("{{embed")
+        }
+        if hasGenerated { reloadAndFocus(nil, selection: nil) }
     }
 
     private func matchesCurrent(_ fresh: [OutlineOps.VisibleRow]) -> Bool {
@@ -431,13 +443,14 @@ final class OutlineEditorController: NSObject {
         }
     }
 
-    private func render(_ content: String) -> NSAttributedString {
+    private func render(_ content: String, todoBlockID: UUID? = nil) -> NSAttributedString {
         BlockRenderer.render(content: content, context: BlockRenderer.Context(
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
             inlineQuoteBar: false, // the row cell draws one continuous bar
             resolveEmbed: { [weak self] target in self?.renderEmbed(target) },
-            resolveQuery: { [weak self] expr in self?.renderQuery(expr) }
+            resolveQuery: { [weak self] expr in self?.renderQuery(expr) },
+            todoBlockID: todoBlockID
         ))
     }
 
@@ -517,7 +530,9 @@ final class OutlineEditorController: NSObject {
                 body.append(NSAttributedString(string: indent,
                                                attributes: [.font: BlockRenderer.baseFont()]))
                 body.append(Self.embedBullet())
-                body.append(BlockRenderer.render(content: block.content, context: inner))
+                var blockContext = inner
+                blockContext.todoBlockID = block.id  // toggle the embedded block, not the source
+                body.append(BlockRenderer.render(content: block.content, context: blockContext))
                 applyHangingIndent(body, range: NSRange(location: start, length: body.length - start),
                                    hang: bulletHangWidth(indent: indent))
                 if !block.collapsed { walk(block.children, depth: depth + 1) }
@@ -544,7 +559,7 @@ final class OutlineEditorController: NSObject {
     ) {
         guard body.length > 0 else { return }
         let full = NSRange(location: 0, length: body.length)
-        if let linkAll { body.addAttribute(.link, value: linkAll, range: full) }
+        if let linkAll { addNavigationLink(body, linkAll, over: full) }
         body.addAttribute(.embedRegion, value: true, range: full)
         // Pin per line by its tallest font, so an embedded `## heading` keeps its
         // full height instead of being clipped to the base line height.
@@ -579,6 +594,16 @@ final class OutlineEditorController: NSObject {
                 style.lineSpacing = max(style.lineSpacing, lineSpacing)
             }
             body.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+    }
+
+    /// Paints `url` as the click target across `range`, but leaves any TODO
+    /// checkbox's `knopo://toggle-todo` link intact — so a checkbox inside a
+    /// query result or embed still toggles instead of navigating to the source.
+    private func addNavigationLink(_ body: NSMutableAttributedString, _ url: URL, over range: NSRange) {
+        body.enumerateAttribute(.link, in: range) { value, sub, _ in
+            if let existing = value as? URL, existing.host == "toggle-todo" { return }
+            body.addAttribute(.link, value: url, range: sub)
         }
     }
 
@@ -651,13 +676,15 @@ final class OutlineEditorController: NSObject {
             let row = NSMutableAttributedString(
                 string: "    ", attributes: [.font: BlockRenderer.baseFont()])
             row.append(Self.embedBullet())
-            row.append(BlockRenderer.render(content: hit.content, context: inner))
-            // The whole result row navigates to that block. Carry the page name
-            // (not a bare block id) — the index id may not survive a re-parse,
-            // so a name-less block link can fail to resolve its page.
-            row.addAttribute(.link,
-                             value: KnopoURL.block(hit.blockID, onPage: hit.pageDisplayName),
-                             range: NSRange(location: 0, length: row.length))
+            var hitContext = inner
+            hitContext.todoBlockID = hit.blockID  // toggle this hit's block, not the host
+            row.append(BlockRenderer.render(content: hit.content, context: hitContext))
+            // The whole result row navigates to that block — except its TODO
+            // checkbox, which keeps its toggle link. Carry the page name (not a
+            // bare block id) — the index id may not survive a re-parse, so a
+            // name-less block link can fail to resolve its page.
+            addNavigationLink(row, KnopoURL.block(hit.blockID, onPage: hit.pageDisplayName),
+                              over: NSRange(location: 0, length: row.length))
             applyHangingIndent(row, range: NSRange(location: 0, length: row.length),
                                hang: bulletHangWidth(indent: "    "))
             line(row)
@@ -692,7 +719,8 @@ final class OutlineEditorController: NSObject {
         // Tracked so a `{{query}}` can exclude its own host block from results.
         renderingBlockID = block.id
         defer { renderingBlockID = nil }
-        let out = render(block.content).mutableCopy() as! NSMutableAttributedString
+        let out = render(block.content, todoBlockID: block.id)
+            .mutableCopy() as! NSMutableAttributedString
         guard !block.properties.isEmpty else { return out }
         let keyAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: BlockRenderer.baseFontSize, weight: .medium),
@@ -1219,24 +1247,20 @@ final class OutlineEditorController: NSObject {
     }
 
     private func handleLink(_ url: URL, blockID: UUID, inSidebar: Bool) {
-        // The rendered TODO/DONE checkbox carries this URL (SPEC §5.2).
-        if url.absoluteString == "knopo://toggle-todo" {
-            toggleTodo(blockID)
+        // The rendered TODO/DONE checkbox carries this URL (SPEC §5.2). In a
+        // query result or embed it names the source block via `?block=`;
+        // otherwise it's the clicked row's own block.
+        if url.scheme == "knopo", url.host == "toggle-todo" {
+            let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "block" }?
+                .value.flatMap { UUID(uuidString: $0) } ?? blockID
+            if app.toggleTodo(blockID: target) {
+                reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
+                    ? editor.selectedRange() : nil)
+            }
             return
         }
         nav.openURL(url, inSidebar: inSidebar)
-    }
-
-    private func toggleTodo(_ id: UUID) {
-        var doc = app.document(for: pageName)
-        guard let path = doc.blocks.path(to: id),
-              let block = doc.blocks.block(at: path),
-              let state = block.todoState else { return }
-        let rest = String(block.content.dropFirst(state.rawValue.count))
-        doc.blocks.update(at: path) { $0.content = state.toggled.rawValue + rest }
-        app.commit(doc, undoLabel: state == .todo ? "Mark Done" : "Mark Todo")
-        reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
-            ? editor.selectedRange() : nil)
     }
 
     private func resizeImage(_ id: UUID, imageIndex: Int, width: CGFloat) {

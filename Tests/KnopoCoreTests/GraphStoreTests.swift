@@ -83,6 +83,21 @@ import Foundation
         expectEqual(tagged.first?.pageDisplayName, "A")
     }
 
+    @Test func resolveBlockByVolatileIndexID() throws {
+        // A query hit carries the *index* block id. Un-persisted blocks get a
+        // fresh random id on every parse, so that id won't match a freshly
+        // loaded page — `resolveBlock` must relocate by preorder position.
+        let store = try makeGraph(["Tasks": "- TODO buy milk\n- DONE call mom\n"])
+        let hits = try store.cache.runQuery(QueryParser.parse("TODO")!, limit: 10).hits
+        expectEqual(hits.count, 1)
+        let resolved = store.resolveBlock(hits[0].blockID)
+        expectEqual(resolved?.pageName, "Tasks")
+        expectEqual(resolved?.block.content, "TODO buy milk")
+        // The resolved block's id is the live in-memory one (usable for edits),
+        // not the volatile index id we looked up with.
+        expectEqual(store.page(named: "Tasks").blocks.path(to: resolved!.block.id) != nil, true)
+    }
+
     @Test func stubPages() throws {
         let store = try makeGraph(["A": "- mentions [[Ghost Page]]\n"])
         expectEqual(try store.cache.stubPageNames(), ["Ghost Page"])

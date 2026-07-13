@@ -31,6 +31,11 @@ enum BlockRenderer {
         /// Renders a `{{query …}}` expression's results (read-only); nil = no
         /// resolver in this context (rendered as a muted chip). §17.
         var resolveQuery: (QueryExpr) -> NSAttributedString?
+        /// The block being rendered, when known — its TODO checkbox then carries
+        /// a `knopo://toggle-todo?block=<id>` link so a click can toggle the
+        /// right block even in a query result or embed (where the surrounding
+        /// row/region navigates elsewhere). Nil → the bare `knopo://toggle-todo`.
+        var todoBlockID: UUID?
 
         init(resolveBlockRef: @escaping (UUID) -> String? = { _ in nil },
              assetsDir: URL? = nil,
@@ -38,7 +43,8 @@ enum BlockRenderer {
              pageDisplayTitle: ((String) -> String?)? = nil,
              pageRefBrackets: Bool = BlockRenderer.bracketsEnabled,
              resolveEmbed: @escaping (EmbedTarget) -> NSAttributedString? = { _ in nil },
-             resolveQuery: @escaping (QueryExpr) -> NSAttributedString? = { _ in nil }) {
+             resolveQuery: @escaping (QueryExpr) -> NSAttributedString? = { _ in nil },
+             todoBlockID: UUID? = nil) {
             self.resolveBlockRef = resolveBlockRef
             self.assetsDir = assetsDir
             self.inlineQuoteBar = inlineQuoteBar
@@ -46,6 +52,7 @@ enum BlockRenderer {
             self.pageRefBrackets = pageRefBrackets
             self.resolveEmbed = resolveEmbed
             self.resolveQuery = resolveQuery
+            self.todoBlockID = todoBlockID
         }
     }
 
@@ -157,7 +164,7 @@ enum BlockRenderer {
     /// (1.33× the text font) had an ascent taller than the line: it pushed the
     /// first line's baseline down (misaligning the bullet), hung below the
     /// text band, and grew the row height past the pinned metrics.
-    static func todoCheckbox(done: Bool) -> NSAttributedString {
+    static func todoCheckbox(done: Bool, blockID: UUID? = nil) -> NSAttributedString {
         let font = baseFont()
         let side = (font.capHeight * 1.3).rounded()
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
@@ -191,8 +198,12 @@ enum BlockRenderer {
         )
         let out = NSMutableAttributedString(attachment: attachment)
         out.append(NSAttributedString(string: " ", attributes: [.font: font]))
+        // Carry the block id when known so a click in a query result / embed
+        // toggles the right block, not whatever the surrounding row links to.
+        let link = blockID.map { "knopo://toggle-todo?block=\($0.uuidString.lowercased())" }
+            ?? "knopo://toggle-todo"
         out.addAttribute(
-            .link, value: URL(string: "knopo://toggle-todo")!,
+            .link, value: URL(string: link)!,
             range: NSRange(location: 0, length: out.length)
         )
         return out
@@ -377,7 +388,7 @@ enum BlockRenderer {
         case .paragraph(let text, let todo):
             let out = NSMutableAttributedString()
             if let todo {
-                out.append(todoCheckbox(done: todo == .done))
+                out.append(todoCheckbox(done: todo == .done, blockID: context.todoBlockID))
             }
             let body = inline(
                 text,

@@ -106,6 +106,26 @@ final class AppState: ObservableObject {
         scheduleSave(doc.name)
     }
 
+    /// Toggles a block's TODO/DONE state wherever the block lives — the block
+    /// clicked in a query result or embed may belong to another page. Saves
+    /// immediately (not on the debounce) so `cache.runQuery` reflects the change
+    /// before the caller re-renders. Returns false if the block can't be
+    /// resolved or carries no task marker.
+    @discardableResult
+    func toggleTodo(blockID: UUID) -> Bool {
+        // `resolveBlock` relocates volatile query-result ids to the live block,
+        // so use *its* id (matches the loaded doc), not the passed-in one.
+        guard let resolved = store.resolveBlock(blockID),
+              let state = resolved.block.todoState else { return false }
+        var doc = document(for: resolved.pageName)
+        guard let path = doc.blocks.path(to: resolved.block.id) else { return false }
+        let rest = String(resolved.block.content.dropFirst(state.rawValue.count))
+        doc.blocks.update(at: path) { $0.content = state.toggled.rawValue + rest }
+        commit(doc, undoLabel: state == .todo ? "Mark Done" : "Mark Todo")
+        flushPendingSave(forPage: doc.name)
+        return true
+    }
+
     private func scheduleSave(_ name: String) {
         let key = PageName.key(name)
         pendingSaves[key]?.cancel()
@@ -117,6 +137,16 @@ final class AppState: ObservableObject {
         }
         pendingSaves[key] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    /// Saves one page now and drops its pending debounce — used when a change
+    /// must hit the index immediately (a TODO toggle feeding a query re-render).
+    private func flushPendingSave(forPage name: String) {
+        let key = PageName.key(name)
+        pendingSaves[key]?.cancel()
+        pendingSaves[key] = nil
+        try? store.savePage(named: name)
+        dataVersion += 1
     }
 
     func flushPendingSaves() {
