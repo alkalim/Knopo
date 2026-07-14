@@ -38,7 +38,10 @@ struct FindBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .onAppear { fieldFocused = true }
+        // Deferred: at onAppear the field isn't in the window yet, so an
+        // immediate focus request can be dropped (notably when a block editor
+        // just resigned first responder).
+        .onAppear { DispatchQueue.main.async { fieldFocused = true } }
     }
 
     private var matchLabel: String {

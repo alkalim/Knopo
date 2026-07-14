@@ -175,7 +175,14 @@ final class Navigator: ObservableObject {
 
     // MARK: - In-page find
 
-    func openFind() { findActive = true }
+    func openFind() {
+        // Release a live block editor (an NSTextView first responder) so the
+        // find field can take focus — otherwise the field appears but the caret
+        // stays in the block. Committing that block's edit is expected: Cmd+F
+        // moves you to the search field (Esc returns).
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        findActive = true
+    }
 
     func closeFind() {
         findActive = false
