@@ -124,6 +124,37 @@ import Foundation
         expectEqual(blocks[1].children.map(\.content), ["a1"])
     }
 
+    @Test func indentRunTucksSiblingsUnderPrevious() {
+        var blocks = forest("- a\n- b\n  - b1\n- c\n- d\n")
+        // Indent [b, c, d] under a — subtrees intact, in order.
+        expectTrue(OutlineOps.indentRun([[1], [2], [3]], in: &blocks))
+        expectEqual(blocks.map(\.content), ["a"])
+        expectEqual(blocks[0].children.map(\.content), ["b", "c", "d"])
+        expectEqual(blocks[0].children[0].children.map(\.content), ["b1"])
+    }
+
+    @Test func indentRunRequiresPrecedingSibling() {
+        var blocks = forest("- a\n- b\n")
+        expectFalse(OutlineOps.indentRun([[0], [1]], in: &blocks)) // run starts at index 0
+        expectEqual(blocks.map(\.content), ["a", "b"])
+    }
+
+    @Test func outdentRunLiftsContiguousChildrenWithoutAdopting() {
+        var blocks = forest("- p\n  - x\n  - b\n  - c\n  - y\n")
+        // Lift [b, c] to top level after p; x and y stay under p (no adoption).
+        expectTrue(OutlineOps.outdentRun([[0, 1], [0, 2]], in: &blocks))
+        expectEqual(blocks.map(\.content), ["p", "b", "c"])
+        expectEqual(blocks[0].children.map(\.content), ["x", "y"])
+        expectEqual(blocks[1].children.count, 0)
+    }
+
+    @Test func indentOutdentRunRejectInvalidRuns() {
+        var blocks = forest("- a\n- b\n- c\n- d\n")
+        expectFalse(OutlineOps.indentRun([[1], [3]], in: &blocks))   // non-contiguous
+        expectFalse(OutlineOps.outdentRun([[0], [1]], in: &blocks))  // top level, no parent
+        expectEqual(blocks.map(\.content), ["a", "b", "c", "d"])     // unchanged
+    }
+
     @Test func moveRunMovesContiguousSiblingsAsUnit() {
         var blocks = forest("- a\n- b\n- c\n- d\n")
         expectTrue(OutlineOps.moveRun([[1], [2]], by: 1, in: &blocks))

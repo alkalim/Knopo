@@ -901,9 +901,9 @@ final class OutlineEditorController: NSObject {
             guard hasSelection else { return false }
             deleteSelection()
             return true
-        case 48: // Tab / Shift+Tab — single-selection only (multi is ambiguous)
-            guard selectedRows.count == 1, let i = selectedRows.first else { return hasSelection }
-            indentOutdentSelected(row: i, outdent: flags.contains(.shift))
+        case 48: // Tab / Shift+Tab
+            guard hasSelection else { return false }
+            indentOutdentSelection(outdent: flags.contains(.shift))
             return true
         case 53: // Esc clears selection
             guard hasSelection else { return false }
@@ -1039,18 +1039,35 @@ final class OutlineEditorController: NSObject {
         for i in blocks.indices { removeBlocks(ids, from: &blocks[i].children) }
     }
 
-    private func indentOutdentSelected(row i: Int, outdent: Bool) {
-        guard rows.indices.contains(i) else { return }
-        let id = rows[i].block.id
+    /// Tab / Shift+Tab on a node selection: indent the selected run under the
+    /// block above it, or outdent it one level. Acts on the top-most selected
+    /// blocks (a selected child rides with its selected ancestor); they must be
+    /// contiguous siblings, else it's a no-op. A single block keeps the classic
+    /// outdent (which adopts trailing siblings); a run uses a plain group-lift.
+    private func indentOutdentSelection(outdent: Bool) {
+        let selectedIDs = Set(selectedRows.compactMap {
+            rows.indices.contains($0) ? rows[$0].block.id : nil
+        })
+        let ids = topMostSelectedRows().compactMap {
+            rows.indices.contains($0) ? rows[$0].block.id : nil
+        }
+        guard !ids.isEmpty else { return }
         var doc = app.document(for: pageName)
-        guard let path = doc.blocks.path(to: id),
-              (outdent ? OutlineOps.outdent(path, in: &doc.blocks)
-                       : OutlineOps.indent(path, in: &doc.blocks)) else { return }
+        let paths = ids.compactMap { doc.blocks.path(to: $0) }
+        guard paths.count == ids.count else { return }
+        let ok: Bool
+        if paths.count == 1 {
+            ok = outdent ? OutlineOps.outdent(paths[0], in: &doc.blocks)
+                         : OutlineOps.indent(paths[0], in: &doc.blocks)
+        } else {
+            ok = outdent ? OutlineOps.outdentRun(paths, in: &doc.blocks)
+                         : OutlineOps.indentRun(paths, in: &doc.blocks)
+        }
+        guard ok else { return }
         commitStructural(doc, label: outdent ? "Outdent" : "Indent")
         reloadAndFocus(nil, selection: nil)
-        if let newIndex = rows.firstIndex(where: { $0.block.id == id }) {
-            setSelection([newIndex], anchor: newIndex)
-        }
+        let newSelection = Set(rows.indices.filter { selectedIDs.contains(rows[$0].block.id) })
+        if !newSelection.isEmpty { setSelection(newSelection, anchor: newSelection.min()) }
     }
 
     /// ⌥↑/⌥↓ with a node selection: moves the selected blocks (subtrees) as one

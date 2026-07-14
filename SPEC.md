@@ -184,7 +184,7 @@ Tables (GitHub style) render read-only inside a block; editing happens in raw so
 
 - The focused block shows **raw Markdown source** in a plain text editor.
 - Unfocused blocks show the **rendered** form.
-- `Enter` creates a sibling block below; `Shift+Enter` inserts a newline inside the block; `Tab` / `Shift+Tab` indent/outdent; `Backspace` at start of an empty block deletes it and focuses the previous block.
+- `Enter` creates a sibling block below; `Shift+Enter` inserts a newline inside the block; `Tab` / `Shift+Tab` indent/outdent; `Backspace` at start of an empty block deletes it and focuses the previous block. With a multi-block selection, `Tab` indents the whole run under the block above it and `Shift+Tab` lifts it one level (contiguous siblings only; a run outdents as a plain group-lift, without the single block's trailing-sibling adoption).
 - `Alt+↑/↓` moves a block (with subtree) among its siblings. With a multi-block selection, the selected blocks move as one unit: a selected descendant travels with its selected ancestor, and the top-most selected blocks must be contiguous siblings (otherwise nothing moves).
 - `Cmd+Enter` toggles the focused block's `TODO`/`DONE` state (§5.2).
 - Typing a formatting marker over a **selection** wraps it instead of replacing it: `[`, `` ` ``, `*`, `~`, `=`, `$` surround the selected text, which stays selected — pressing the key again doubles the marker (`[` `[` → `[[Page]]`, `*` `*` → `**bold**`).

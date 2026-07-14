@@ -109,6 +109,64 @@ public enum OutlineOps {
         return true
     }
 
+    /// Validates that `paths` are contiguous siblings, returning their common
+    /// parent path and sorted child indices; nil otherwise (a gap, mixed
+    /// parents, or an empty path). Shared by the multi-block indent/outdent.
+    private static func contiguousRun(_ paths: [[Int]]) -> (parentPath: [Int], indices: [Int])? {
+        guard let first = paths.first else { return nil }
+        let parentPath = Array(first.dropLast())
+        let indices = paths.compactMap(\.last).sorted()
+        guard paths.count == indices.count,
+              paths.allSatisfy({ Array($0.dropLast()) == parentPath }),
+              indices.last! - indices.first! == indices.count - 1
+        else { return nil }
+        return (parentPath, indices)
+    }
+
+    /// Tab on a multi-block selection: makes a contiguous sibling run the
+    /// children of the block immediately above it, in order, each keeping its
+    /// subtree. No-op (false) unless the paths are contiguous siblings with a
+    /// preceding sibling to tuck under.
+    @discardableResult
+    public static func indentRun(_ paths: [[Int]], in blocks: inout [Block]) -> Bool {
+        guard let run = contiguousRun(paths), run.indices.first! > 0 else { return false }
+        var moved: [Block] = []
+        for index in run.indices.reversed() {  // back-to-front keeps indices valid
+            guard let b = blocks.remove(at: run.parentPath + [index]) else { return false }
+            moved.insert(b, at: 0)
+        }
+        let reparented = moved.map { b -> Block in var b = b; b.invalidateRaw(deep: true); return b }
+        blocks.update(at: run.parentPath + [run.indices.first! - 1]) {
+            $0.children.append(contentsOf: reparented)
+            $0.collapsed = false
+        }
+        return true
+    }
+
+    /// Shift+Tab on a multi-block selection: lifts a contiguous sibling run to
+    /// its parent's level, inserted right after the parent, order preserved.
+    /// Unlike single-block `outdent`, the run does *not* adopt the parent's
+    /// other children — they stay put (a plain group-lift). No-op at top level.
+    @discardableResult
+    public static func outdentRun(_ paths: [[Int]], in blocks: inout [Block]) -> Bool {
+        guard let run = contiguousRun(paths), run.parentPath.count >= 1 else { return false }
+        var moved: [Block] = []
+        for index in run.indices.reversed() {
+            guard let b = blocks.remove(at: run.parentPath + [index]) else { return false }
+            moved.insert(b, at: 0)
+        }
+        var insertPath = run.parentPath
+        insertPath[insertPath.count - 1] += 1  // right after the (former) parent
+        for (offset, b) in moved.enumerated() {
+            var b = b
+            b.invalidateRaw(deep: true)
+            var p = insertPath
+            p[p.count - 1] += offset
+            blocks.insert(b, at: p)
+        }
+        return true
+    }
+
     /// Alt+↑/↓: moves a block (with subtree) among its siblings.
     @discardableResult
     public static func move(_ path: [Int], by delta: Int, in blocks: inout [Block]) -> Bool {
