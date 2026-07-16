@@ -114,6 +114,19 @@ final class BlockEditorTextView: NSTextView {
         return hasFileURL || hasBitmap
     }
 
+    /// Declining image *return* types keeps this view out of the image-import
+    /// Services, so the context and Edit menus omit Continuity-Camera items
+    /// ("Insert from iPhone or iPad", "Add Sketch", "Scan Documents") that
+    /// advertising image pasteboard types would otherwise inject. Image paste
+    /// still works — `paste(_:)` reads the pasteboard directly, not via Services.
+    override func validRequestor(
+        forSendType sendType: NSPasteboard.PasteboardType?,
+        returnType: NSPasteboard.PasteboardType?
+    ) -> Any? {
+        if let returnType, [.png, .tiff, .fileURL].contains(returnType) { return nil }
+        return super.validRequestor(forSendType: sendType, returnType: returnType)
+    }
+
     // MARK: - Context menu
 
     /// The stock NSTextView menu is a kitchen sink — Font, Substitutions,
