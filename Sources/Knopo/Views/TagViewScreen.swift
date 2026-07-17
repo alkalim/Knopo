@@ -71,9 +71,10 @@ struct TagViewScreen: View {
     }
 
     private func tagHitRow(_ hit: BacklinkHit) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if !hit.breadcrumb.isEmpty {
-                Text(hit.breadcrumb.map { line in
+        let breadcrumb = (try? app.store.cache.breadcrumb(ofBlock: hit.blockID)) ?? []
+        return VStack(alignment: .leading, spacing: 2) {
+            if !breadcrumb.isEmpty {
+                Text(breadcrumb.map { line in
                     let plain = InlineParser.plainText(InlineParser.parse(
                         line.components(separatedBy: "\n").first ?? line))
                     return plain.count > 30 ? String(plain.prefix(30)) + "…" : plain

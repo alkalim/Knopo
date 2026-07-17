@@ -12,14 +12,18 @@ struct ReferencesSection: View {
     var body: some View {
         let _ = app.dataVersion
         let backlinks = (try? app.store.cache.backlinks(of: PageName.key(pageName))) ?? []
-        let unlinked = (try? app.store.cache.unlinkedReferences(toPageNamed: pageName)) ?? []
+        // Only the cheap existence probe runs per render; the full unlinked
+        // scan (fetch + word-boundary regex) is deferred until the section is
+        // expanded, so opening/editing a heavily-referenced page doesn't pay
+        // for it on every keystroke's debounced save.
+        let hasUnlinked = (try? app.store.cache.hasUnlinkedReferences(toPageNamed: pageName)) ?? false
 
         VStack(alignment: .leading, spacing: 10) {
             if !backlinks.isEmpty {
                 linkedSection(backlinks)
             }
-            if !unlinked.isEmpty {
-                unlinkedSection(unlinked)
+            if hasUnlinked {
+                unlinkedSection()
             }
         }
     }
@@ -37,30 +41,34 @@ struct ReferencesSection: View {
                 .font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
                 .background(Capsule().fill(Color.accentColor.opacity(0.2)))
         }
-        ForEach(groups, id: \.key) { (sourcePage, groupHits) in
-            VStack(alignment: .leading, spacing: 4) {
-                Button {
-                    toggleGroup(sourcePage)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: collapsedGroups.contains(sourcePage)
-                            ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.tertiary)
-                        Text(pageDisplayTitle(sourcePage))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
+        // Lazy so a page with many backlinks only renders (and fetches
+        // breadcrumbs for) the rows currently scrolled into view.
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(groups, id: \.key) { (sourcePage, groupHits) in
+                VStack(alignment: .leading, spacing: 4) {
+                    Button {
+                        toggleGroup(sourcePage)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: collapsedGroups.contains(sourcePage)
+                                ? "chevron.right" : "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.tertiary)
+                            Text(pageDisplayTitle(sourcePage))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    if !collapsedGroups.contains(sourcePage) {
+                        ForEach(groupHits, id: \.blockID) { hit in
+                            BacklinkRow(hit: hit, contextPage: pageName)
+                                .padding(.leading, 14)
+                        }
                     }
                 }
-                .buttonStyle(.plain)
-                if !collapsedGroups.contains(sourcePage) {
-                    ForEach(groupHits, id: \.blockID) { hit in
-                        BacklinkRow(hit: hit, contextPage: pageName)
-                            .padding(.leading, 14)
-                    }
-                }
+                .padding(.vertical, 2)
             }
-            .padding(.vertical, 2)
         }
     }
 
@@ -72,7 +80,13 @@ struct ReferencesSection: View {
     // MARK: - Unlinked (SPEC §9.2)
 
     @ViewBuilder
-    private func unlinkedSection(_ hits: [SearchHit]) -> some View {
+    private func unlinkedSection() -> some View {
+        // The full word-boundary scan runs only while the section is open; the
+        // collapsed header is driven by the cheap existence probe in `body`.
+        let hits = unlinkedExpanded
+            ? ((try? app.store.cache.unlinkedReferences(toPageNamed: pageName)) ?? [])
+            : []
+
         Button {
             unlinkedExpanded.toggle()
         } label: {
@@ -81,29 +95,39 @@ struct ReferencesSection: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.tertiary)
                 Text("Unlinked References").font(.headline)
-                Text("\(hits.count)")
-                    .font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                if unlinkedExpanded {
+                    Text("\(hits.count)")
+                        .font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                }
             }
         }
         .buttonStyle(.plain)
         .padding(.top, 6)
 
         if unlinkedExpanded {
-            ForEach(hits, id: \.blockID) { hit in
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(pageDisplayTitle(hit.pageDisplayName))
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text(AttributedString(BlockRenderer.render(
-                            content: hit.content, context: renderContext())))
+            if hits.isEmpty {
+                Text("No unlinked references.")
+                    .font(.caption).foregroundStyle(.tertiary)
+                    .padding(.leading, 20)
+            } else {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(hits, id: \.blockID) { hit in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(pageDisplayTitle(hit.pageDisplayName))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(AttributedString(BlockRenderer.render(
+                                    content: hit.content, context: renderContext())))
+                            }
+                            Spacer()
+                            Button("Link") { link(hit) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                        .padding(.leading, 14)
                     }
-                    Spacer()
-                    Button("Link") { link(hit) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                 }
-                .padding(.leading, 14)
             }
         }
     }
@@ -146,11 +170,14 @@ struct BacklinkRow: View {
 
     @State private var editing = false
     @State private var draft = ""
+    /// Fetched on appear (see `.task`) rather than up front for every backlink,
+    /// so only rows scrolled into view pay for the ancestor walk.
+    @State private var breadcrumb: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if !hit.breadcrumb.isEmpty {
-                Text(hit.breadcrumb.map(snippet).joined(separator: " › "))
+            if !breadcrumb.isEmpty {
+                Text(breadcrumb.map(snippet).joined(separator: " › "))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -198,6 +225,9 @@ struct BacklinkRow: View {
             }
         }
         .padding(.vertical, 2)
+        .task(id: hit.blockID) {
+            breadcrumb = (try? app.store.cache.breadcrumb(ofBlock: hit.blockID)) ?? []
+        }
     }
 
     private func currentContent() -> String {

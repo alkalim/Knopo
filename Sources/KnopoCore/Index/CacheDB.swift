@@ -8,8 +8,6 @@ public struct BacklinkHit: Equatable, Sendable {
     public var pageKey: String
     public var pageDisplayName: String
     public var content: String
-    /// Contents of ancestor blocks, outermost first (breadcrumb).
-    public var breadcrumb: [String]
 }
 
 public struct SearchHit: Equatable, Sendable {
@@ -451,8 +449,7 @@ public final class CacheDB {
                     blockID: uuid,
                     pageKey: row["page_key"],
                     pageDisplayName: row["display_name"],
-                    content: row["content"],
-                    breadcrumb: try Self.breadcrumb(db, blockID: idString)
+                    content: row["content"]
                 ))
             }
             return hits.sorted { ($0.pageDisplayName, $0.content) < ($1.pageDisplayName, $1.content) }
@@ -475,6 +472,15 @@ public final class CacheDB {
             hops += 1
         }
         return crumbs.reversed()
+    }
+
+    /// Ancestor breadcrumb for one block (outermost first), looked up on
+    /// demand. Reference lists no longer walk ancestors for every hit up
+    /// front; each row fetches only its own breadcrumb when it renders.
+    public func breadcrumb(ofBlock id: UUID) throws -> [String] {
+        try dbQueue.read { db in
+            try Self.breadcrumb(db, blockID: id.uuidString.lowercased())
+        }
     }
 
     /// Blocks containing the page's name as plain text without brackets
@@ -512,6 +518,24 @@ public final class CacheDB {
         }
     }
 
+    /// Cheap probe for whether the Unlinked References section is worth
+    /// showing: true if any block mentions the page name in the full-text
+    /// index. This is the fast half of `unlinkedReferences` (no row fetch, no
+    /// word-boundary regex), so the collapsed header costs almost nothing and
+    /// the full scan runs only when the user expands the section. May
+    /// over-report in the rare case where every candidate fails the precise
+    /// word-boundary filter (header shows, expands to nothing).
+    public func hasUnlinkedReferences(toPageNamed name: String) throws -> Bool {
+        try dbQueue.read { db in
+            try Bool.fetchOne(db, sql: """
+                SELECT EXISTS(
+                    SELECT 1 FROM blocks_fts
+                    WHERE blocks_fts MATCH ? AND page_key <> ?
+                )
+                """, arguments: [ftsPhrase(name), PageName.key(name)]) ?? false
+        }
+    }
+
     // MARK: - Tags (SPEC §8)
 
     public func allTags() throws -> [(tag: String, count: Int)] {
@@ -539,14 +563,13 @@ public final class CacheDB {
                     """,
                 arguments: [tag.lowercased()]
             )
-            return try rows.compactMap { row -> BacklinkHit? in
+            return rows.compactMap { row -> BacklinkHit? in
                 guard let uuid = UUID(uuidString: row["id"]) else { return nil }
                 return BacklinkHit(
                     blockID: uuid,
                     pageKey: row["page_key"],
                     pageDisplayName: row["display_name"],
-                    content: row["content"],
-                    breadcrumb: try Self.breadcrumb(db, blockID: row["id"])
+                    content: row["content"]
                 )
             }.sorted { ($0.pageDisplayName, $0.content) < ($1.pageDisplayName, $1.content) }
         }
@@ -584,14 +607,13 @@ public final class CacheDB {
                          b.position, b.content
                 LIMIT ?
                 """, arguments: StatementArguments(whereArgs + [limit]))
-            var hits = try rows.compactMap { row -> BacklinkHit? in
+            var hits = rows.compactMap { row -> BacklinkHit? in
                 guard let uuid = UUID(uuidString: row["id"]) else { return nil }
                 return BacklinkHit(
                     blockID: uuid,
                     pageKey: row["page_key"],
                     pageDisplayName: row["display_name"],
-                    content: row["content"],
-                    breadcrumb: try Self.breadcrumb(db, blockID: row["id"]))
+                    content: row["content"])
             }
             var seenPages = Set(hits.map(\.pageKey))
 
@@ -618,8 +640,7 @@ public final class CacheDB {
                             blockID: Self.pageHitBlockID,
                             pageKey: key,
                             pageDisplayName: row["display_name"],
-                            content: "",
-                            breadcrumb: []))
+                            content: ""))
                     }
                 }
             }

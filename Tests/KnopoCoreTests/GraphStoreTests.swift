@@ -32,7 +32,11 @@ import Foundation
         expectEqual(backlinks.count, 1)
         expectEqual(backlinks.first?.pageDisplayName, "Notes")
         expectEqual(backlinks.first?.content, "thinking about [[Project X]] today")
-        expectEqual(backlinks.first?.breadcrumb, [])
+        // Breadcrumb is now looked up on demand (not carried on every hit); a
+        // top-level source block has no ancestors.
+        if let id = backlinks.first?.blockID {
+            expectEqual(try store.cache.breadcrumb(ofBlock: id), [])
+        }
     }
 
     @Test func blockRefCountsAsPageBacklink() throws {
