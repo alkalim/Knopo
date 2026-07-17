@@ -27,7 +27,9 @@ struct OutlineRowCallbacks {
 final class OutlineRowCell: NSTableCellView {
 
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("OutlineRowCell")
-    static let indentPerDepth: CGFloat = 22
+    /// Horizontal indent per nesting level. Scales with zoom so nested bullets
+    /// don't crowd together at larger font sizes.
+    static var indentPerDepth: CGFloat { (22 * BlockRenderer.zoom).rounded() }
     /// Space before a block's text, holding the fold chevron and bullet. Scales
     /// with zoom so the bullet-to-text gap grows with the text size.
     static var gutterWidth: CGFloat { (34 * BlockRenderer.zoom).rounded() }
