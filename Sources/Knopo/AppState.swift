@@ -264,6 +264,19 @@ final class AppState: ObservableObject {
         dataVersion += 1
     }
 
+    /// Body-text font weight (View ▸ Font Weight). Stored (not a passthrough to
+    /// the `BlockRenderer` global) so the menu's radio state is observable and
+    /// its checkmark tracks the selection; the didSet feeds the render-time
+    /// global and, like zoom/density, bumps `dataVersion` so every open outline
+    /// re-renders at the new weight.
+    @Published var contentWeight: BlockRenderer.ContentWeight = BlockRenderer.contentWeight {
+        didSet {
+            guard contentWeight != oldValue else { return }
+            BlockRenderer.contentWeight = contentWeight   // persists + render source
+            dataVersion += 1
+        }
+    }
+
     // MARK: - Right-sidebar layout (SPEC §12)
 
     /// Encoded open panes, persisted per graph. No `dataVersion` bump — this is

@@ -222,6 +222,7 @@ final class OutlineEditorController: NSObject {
     private var renderedWithBrackets = BlockRenderer.bracketsEnabled
     private var renderedWithZoom = BlockRenderer.zoom
     private var renderedWithDensity = BlockRenderer.density
+    private var renderedWithWeight = BlockRenderer.contentWeight
 
     /// Bullet drag-and-drop (SPEC §5.4). The pasteboard carries only a marker —
     /// the dragged blocks live here, and drops are accepted from this controller
@@ -391,9 +392,11 @@ final class OutlineEditorController: NSObject {
         let bracketsChanged = BlockRenderer.bracketsEnabled != renderedWithBrackets
         let fontZoomChanged = BlockRenderer.zoom != renderedWithZoom
         let densityChanged = BlockRenderer.density != renderedWithDensity
+        let weightChanged = BlockRenderer.contentWeight != renderedWithWeight
         renderedWithBrackets = BlockRenderer.bracketsEnabled
         renderedWithZoom = BlockRenderer.zoom
         renderedWithDensity = BlockRenderer.density
+        renderedWithWeight = BlockRenderer.contentWeight
         if pageName != self.pageName || zoom != self.zoom {
             self.pageName = pageName
             self.zoom = zoom
@@ -405,7 +408,7 @@ final class OutlineEditorController: NSObject {
             rebuildRows()
             tableView.reloadData()
             tableView.invalidateIntrinsicContentSize()
-        } else if bracketsChanged || fontZoomChanged || densityChanged {
+        } else if bracketsChanged || fontZoomChanged || densityChanged || weightChanged {
             // A global rendering preference flipped (brackets, content zoom, or
             // text density): re-render the cached rows and re-measure heights.
             reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
@@ -546,6 +549,7 @@ final class OutlineEditorController: NSObject {
         hasher.combine(BlockRenderer.bracketsEnabled)
         hasher.combine(BlockRenderer.zoom)
         hasher.combine(BlockRenderer.density)
+        hasher.combine(BlockRenderer.contentWeight)
         if block.content.contains("((") { hasher.combine(app.dataVersion) }
         return hasher.finalize()
     }

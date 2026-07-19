@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import KnopoCore
 
 /// Renders a block's Markdown content as an NSAttributedString for unfocused
@@ -149,6 +150,80 @@ enum BlockRenderer {
     }() {
         didSet { UserDefaults.standard.set(density, forKey: densityKey) }
     }
+    /// Body-text font weight (View ▸ Font Weight). "Medium" is the app's
+    /// original weight (`.regular`); light/heavy step around it. A per-app
+    /// aesthetic choice (not per-graph data), persisted. Applied to body text
+    /// in both the rendered rows and the focused editor so weight never shifts
+    /// on focus. Headings keep their own bold weight.
+    enum ContentWeight: String, CaseIterable {
+        case light, medium, heavy
+
+        /// Value on the SF `wght` variation axis (≈ CSS weight numbers). We use
+        /// the axis rather than `NSFont.Weight`, which snaps to nine discrete
+        /// stops with nothing between Light (≈300) and Regular (400) — too
+        /// coarse for the intermediate light/heavy steps we want.
+        var wght: CGFloat {
+            switch self {
+            case .light: return 330    // ~10% above SF Light (≈300)
+            case .medium: return 400   // Regular — the original default
+            case .heavy: return 480    // clearly above medium, well below semibold (≈590)
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .light: return "Light"
+            case .medium: return "Medium"
+            case .heavy: return "Heavy"
+            }
+        }
+    }
+
+    /// UserDefaults key for the persisted weight. Exposed so the View menu can
+    /// bind an `@AppStorage` to the same key — that makes its radio checkmark
+    /// reactive (a menu-bar Picker/focused-value binding does not reliably
+    /// re-render on change).
+    static let contentWeightKey = "contentWeight"
+    static var contentWeight: ContentWeight = {
+        ContentWeight(rawValue: UserDefaults.standard.string(forKey: contentWeightKey) ?? "") ?? .medium
+    }() {
+        didSet { UserDefaults.standard.set(contentWeight.rawValue, forKey: contentWeightKey) }
+    }
+
+    /// SF `wght` OpenType variation axis identifier ('wght').
+    private static let weightAxis = 0x77676874
+    private static let variationKey =
+        NSFontDescriptor.AttributeName(kCTFontVariationAttribute as String)
+    /// The system font at `size` and the current content weight. `.medium` is
+    /// plain Regular (no variation); light/heavy ride the `wght` axis.
+    static func weightedSystemFont(ofSize size: CGFloat) -> NSFont {
+        applyingWeight(contentWeight.wght, to: NSFont.systemFont(ofSize: size),
+                       skipIf: contentWeight == .medium)
+    }
+
+    /// Weight for **bold** runs: a fixed step above the body weight, so bold
+    /// stays clearly bolder as the body weight rises (at heavy, plain `.bold`
+    /// is barely above the body). Medium's 400 → 700 matches ordinary bold.
+    static var boldWght: CGFloat { min(contentWeight.wght + 300, 900) }
+
+    /// A bold rendition of `font` via the `wght` axis. The `.bold` *symbolic
+    /// trait* is swallowed when the descriptor already pins an explicit `wght`
+    /// (our light/heavy body text), so bold text wouldn't thicken; setting the
+    /// axis directly does. Existing traits (italic) are preserved.
+    static func bolder(_ font: NSFont) -> NSFont {
+        applyingWeight(boldWght, to: font, skipIf: false)
+    }
+
+    private static func applyingWeight(
+        _ wght: CGFloat, to font: NSFont, skipIf skip: Bool
+    ) -> NSFont {
+        guard !skip else { return font }
+        let descriptor = font.fontDescriptor.addingAttributes([
+            variationKey: [weightAxis: wght],
+        ])
+        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+    }
+
     /// Line height is pinned to the font metrics times this factor — tightens
     /// vertical spacing without shrinking text.
     static let lineHeightScale: CGFloat = 0.9
@@ -223,7 +298,7 @@ enum BlockRenderer {
         if case .heading(let level, _) = BlockKind.classify(source) {
             return headingFont(level: level)
         }
-        return NSFont.systemFont(ofSize: baseFontSize)
+        return weightedSystemFont(ofSize: baseFontSize)
     }
 
     /// Fixed line height for a block's source. Pinning to the base font's
@@ -446,7 +521,7 @@ enum BlockRenderer {
             case .lineBreak:
                 out.append(NSAttributedString(string: "\n", attributes: attrs()))
             case .bold(let inner):
-                appendNodes(inner, to: out, font: withTrait(font, .bold), color: color,
+                appendNodes(inner, to: out, font: bolder(font), color: color,
                             strike: strike, highlight: highlight, context: context,
                             imageIndex: &imageIndex)
             case .italic(let inner):
@@ -664,14 +739,20 @@ enum BlockRenderer {
     // MARK: - Fonts
 
     static func baseFont(italic: Bool = false) -> NSFont {
-        let font = NSFont.systemFont(ofSize: baseFontSize)
+        let font = weightedSystemFont(ofSize: baseFontSize)
         return italic ? withTrait(font, .italic) : font
     }
 
     static func withTrait(_ font: NSFont, _ trait: NSFontDescriptor.SymbolicTraits) -> NSFont {
-        let descriptor = font.fontDescriptor.withSymbolicTraits(
+        var descriptor = font.fontDescriptor.withSymbolicTraits(
             font.fontDescriptor.symbolicTraits.union(trait)
         )
+        // `withSymbolicTraits` drops an explicit `wght`/optical-size variation,
+        // so italic (or any trait) on light/heavy body text would snap back to
+        // regular weight — re-apply the source font's variation to keep it.
+        if let variation = font.fontDescriptor.fontAttributes[variationKey] {
+            descriptor = descriptor.addingAttributes([variationKey: variation])
+        }
         return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
     }
 }

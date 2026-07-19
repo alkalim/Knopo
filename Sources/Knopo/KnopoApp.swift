@@ -177,6 +177,11 @@ struct KnopoApp: App {
 /// their own undo, zoom, etc.).
 private struct GraphCommands: Commands {
     @FocusedValue(\.graphActions) private var graph: GraphActions?
+    /// Drives the Font Weight radio checkmark. Bound to the same UserDefaults
+    /// key the setting persists to, so selecting a weight (which writes that
+    /// key) re-renders this menu and moves the checkmark.
+    @AppStorage(BlockRenderer.contentWeightKey) private var contentWeightRaw =
+        BlockRenderer.ContentWeight.medium.rawValue
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -225,6 +230,25 @@ private struct GraphCommands: Commands {
                 .keyboardShortcut("-", modifiers: [.command, .control]).disabled(graph == nil)
             Button("Reset Line Spacing") { graph?.app.resetDensity() }
                 .keyboardShortcut("0", modifiers: [.command, .control]).disabled(graph == nil)
+            Divider()
+            // Body-text font weight. Explicit checkmark buttons (not a Picker)
+            // because a menu-bar Picker caches its selection and won't re-sync
+            // its checkmark from the binding when the value changes; these
+            // buttons re-evaluate their label each time the menu opens.
+            Menu("Font Weight") {
+                ForEach(BlockRenderer.ContentWeight.allCases, id: \.self) { weight in
+                    Button {
+                        graph?.app.contentWeight = weight
+                    } label: {
+                        if contentWeightRaw == weight.rawValue {
+                            Label(weight.title, systemImage: "checkmark")
+                        } else {
+                            Text(weight.title)
+                        }
+                    }
+                }
+            }
+            .disabled(graph == nil)
             Divider()
             Button("Clear Recents") {
                 guard let app = graph?.app else { return }

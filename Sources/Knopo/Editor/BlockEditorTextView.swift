@@ -40,7 +40,9 @@ final class BlockEditorTextView: NSTextView {
 
     /// Proportional, matching the rendered rows — the focused block shows raw
     /// Markdown source, but it shouldn't feel like a different document.
-    static var editorFont: NSFont { NSFont.systemFont(ofSize: BlockRenderer.baseFontSize) }
+    static var editorFont: NSFont {
+        BlockRenderer.weightedSystemFont(ofSize: BlockRenderer.baseFontSize)
+    }
 
     static func create() -> BlockEditorTextView {
         let view = BlockEditorTextView(usingTextLayoutManager: true)
@@ -598,7 +600,7 @@ final class BlockEditorTextView: NSTextView {
             case .none:
                 break
             case .bold:
-                attrs[.font] = NSFont.systemFont(ofSize: base.pointSize, weight: .bold)
+                attrs[.font] = BlockRenderer.bolder(base)
             case .mono:
                 attrs[.font] = NSFont.monospacedSystemFont(
                     ofSize: base.pointSize - 1, weight: .regular)
