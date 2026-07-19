@@ -2,6 +2,26 @@
 
 Notable changes per release, newest first. Dates are release dates.
 
+## v0.5.0 (2026-07-19)
+
+Much faster editing on large pages, and a body font-weight setting.
+
+**New**
+- Font weight setting (View ▸ Font Weight): Light, Medium, or Heavy body text.
+- `***bold italic***` renders as bold italic.
+- Selecting several blocks gives a dedicated right-click menu (copy or delete the selection), rendered blocks get the block menu without needing focus, and copying now puts exactly the selected blocks on the clipboard.
+
+**Improved**
+- Pages with many blocks and references open quicker, and pressing Enter or moving blocks updates only the affected rows instead of re-rendering the whole page. Typing no longer hitches around the auto-save.
+- The journal home puts more air between a day's last block and the next day's separator.
+- On macOS 26, the right sidebar is lighter, with subtler card borders and slightly larger card titles.
+
+**Fixed**
+- Inline-code backgrounds no longer smear across wrapped lines.
+- Clicking a query or reference result reliably highlights the target block.
+- Nested indentation scales with the content zoom.
+- Shift+Up/Down shrinks a selection back toward its start instead of always growing it.
+
 ## v0.4.0 (2026-07-16)
 
 Images, live TODO checkboxes in queries and embeds, and a native find bar.
