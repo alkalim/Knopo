@@ -75,12 +75,12 @@ struct RightSidebar: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.bold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(pane.collapsed ? 0 : 90))
                         .animation(.easeInOut(duration: 0.15), value: pane.collapsed)
                     Text(paneTitle(pane.target))
-                        .font(.callout.weight(.semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
@@ -100,7 +100,7 @@ struct RightSidebar: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 10)
     }
 
     /// The card-header actions menu — the single menu for every pane type, so a
@@ -204,16 +204,21 @@ struct RightSidebar: View {
     }()
 
     static let columnColor = Color(nsColor: .dynamic(
-        light: NSColor(white: isMacOS26OrLater ? 0.965 : 0.94, alpha: 1),  // lighter dim grey
-        dark: NSColor(white: 0.12, alpha: 1)))    // recessed, the darkest layer
+        // On 26, pull the recessed column toward its extreme (near-white in
+        // light, near-black in dark) so it reads as a clean backdrop rather
+        // than a grey slab; 15 keeps its heavier grey to suit that chrome.
+        light: NSColor(white: isMacOS26OrLater ? 0.98 : 0.94, alpha: 1),
+        dark: NSColor(white: isMacOS26OrLater ? 0.10 : 0.12, alpha: 1)))
 
     static let cardColor = Color(nsColor: .dynamic(
         light: .textBackgroundColor,              // white
         dark: NSColor(white: 0.21, alpha: 1)))     // clearly above the column
 
     static let cardBorder = Color(nsColor: .dynamic(
+        // 26's cards wear a thin, luminous hairline: a softer, cooler rim in
+        // dark; light keeps its faint hairline.
         light: NSColor.separatorColor.withAlphaComponent(isMacOS26OrLater ? 0.12 : 0.25),
-        dark: NSColor(white: 1, alpha: 0.14)))     // a visible rim in the dark
+        dark: NSColor(white: 1, alpha: isMacOS26OrLater ? 0.10 : 0.14)))
 }
 
 extension NSColor {
