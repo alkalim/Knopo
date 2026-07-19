@@ -435,7 +435,13 @@ public enum InlineParser {
                 }
 
             case "*":
-                if i + 1 < chars.count, chars[i + 1] == "*",
+                if i + 2 < chars.count, chars[i + 1] == "*", chars[i + 2] == "*",
+                   let end = find(["*", "*", "*"], from: i + 3), end > i + 3 {
+                    // `***text***` → bold + italic (CommonMark strong+emphasis).
+                    flush()
+                    nodes.append(.bold([.italic(parse(slice(i + 3, end)))]))
+                    i = end + 3
+                } else if i + 1 < chars.count, chars[i + 1] == "*",
                    let end = find(["*", "*"], from: i + 2), end > i + 2 {
                     flush()
                     nodes.append(.bold(parse(slice(i + 2, end))))

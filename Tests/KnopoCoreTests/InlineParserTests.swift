@@ -75,6 +75,21 @@ import Foundation
         )
     }
 
+    @Test func boldItalic() {
+        // `***x***` is CommonMark strong+emphasis: bold wrapping italic.
+        expectEqual(
+            InlineParser.parse("***bi***"),
+            [.bold([.italic([.text("bi")])])]
+        )
+        expectEqual(
+            InlineParser.parse("a ***b*** c"),
+            [.text("a "), .bold([.italic([.text("b")])]), .text(" c")]
+        )
+        // Plain bold/italic are unaffected by the new triple-star branch.
+        expectEqual(InlineParser.parse("**b**"), [.bold([.text("b")])])
+        expectEqual(InlineParser.parse("*i*"), [.italic([.text("i")])])
+    }
+
     @Test func codeSpanSuppressesRefs() {
         expectEqual(
             InlineParser.parse("`[[not a ref]] #notag`"),
