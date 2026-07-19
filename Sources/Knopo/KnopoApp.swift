@@ -140,6 +140,8 @@ struct KnopoApp: App {
     @StateObject private var manager = GraphManager()
 
     init() {
+        // KNOPO_BENCH=1: run the headless perf harness and exit (see Bench.swift).
+        MainActor.assumeIsolated { Bench.runIfRequested() }
         // SPM executables aren't app bundles; make us a regular GUI app.
         // The app icon comes from the bundle (see scripts/build-app.sh) so the
         // OS can theme it ("Icon & widget style" on macOS 26); we deliberately
