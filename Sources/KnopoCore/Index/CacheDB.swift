@@ -320,6 +320,23 @@ public final class CacheDB {
         }
     }
 
+    /// All known file stamps in one query — the startup scan and the file
+    /// watcher compare every page on disk, and a per-page query each is the
+    /// dominant cost of those scans.
+    public func fileStamps() throws -> [String: FileStamp] {
+        try dbQueue.read { db in
+            var stamps: [String: FileStamp] = [:]
+            let rows = try Row.fetchAll(
+                db, sql: "SELECT name_key, file_mtime, file_size FROM pages")
+            for row in rows {
+                guard let mtime: Double = row["file_mtime"],
+                      let size: Int = row["file_size"] else { continue }
+                stamps[row["name_key"]] = FileStamp(mtime: mtime, size: size)
+            }
+            return stamps
+        }
+    }
+
     public func clearAll() throws {
         try dbQueue.write { db in
             for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {

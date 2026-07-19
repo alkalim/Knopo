@@ -55,8 +55,10 @@ final class AppState: ObservableObject {
             paths: [store.pagesDir.path, store.journalsDir.path]
         ) { [weak self] in
             guard let self else { return }
+            // No dataVersion bump here: our own debounced saves trigger this
+            // watcher too, and a bump re-renders every visible view. Real
+            // external changes bump via `onExternalChange` above.
             _ = try? self.store.handleExternalChanges()
-            self.dataVersion += 1
         }
         watcher.start()
         self.watcher = watcher

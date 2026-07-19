@@ -59,15 +59,14 @@ public final class GraphStore {
     /// path (SPEC §14).
     public func synchronizeIndex(force: Bool = false) throws {
         if force { try cache.clearAll() }
+        let known = force ? [:] : try cache.fileStamps()
         var onDisk = Set<String>()
         for (url, isJournal) in pageFiles() {
             guard let name = PageName.name(fromFileName: url.lastPathComponent) else { continue }
             let key = PageName.key(name)
             onDisk.insert(key)
             guard let stamp = Self.stamp(of: url) else { continue }
-            if !force, let known = try cache.fileStamp(forPageKey: key), known == stamp {
-                continue
-            }
+            if !force, known[key] == stamp { continue }
             let doc = Self.read(url: url, name: name, isJournal: isJournal)
             try cache.indexPage(doc, stamp: stamp)
         }
@@ -367,12 +366,13 @@ public final class GraphStore {
     public func handleExternalChanges() throws -> Set<String> {
         var affected = Set<String>()
         var onDisk = Set<String>()
+        let knownStamps = try cache.fileStamps()
         for (url, isJournal) in pageFiles() {
             guard let name = PageName.name(fromFileName: url.lastPathComponent) else { continue }
             let key = PageName.key(name)
             onDisk.insert(key)
             guard let stamp = Self.stamp(of: url) else { continue }
-            if let known = try cache.fileStamp(forPageKey: key), known == stamp { continue }
+            if knownStamps[key] == stamp { continue }
 
             if let inMemory = loaded[key], inMemory.isDirty {
                 try saveConflictCopy(of: inMemory)
