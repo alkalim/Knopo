@@ -181,7 +181,8 @@ enum KnopoURL {
 
 /// A page's list/header display title: journal pages show their pretty date
 /// ("Apr 21st, 2026"); other pages use the literal name. Shared by the
-/// references section, search palette, query results, and pane titles.
+/// All Pages view, references section, search palette, query results, and pane
+/// titles.
 func pageDisplayTitle(_ name: String) -> String {
     JournalDate(pageName: name)?.displayName ?? name
 }

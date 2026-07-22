@@ -16,9 +16,14 @@ struct AllPagesView: View {
     var body: some View {
         let _ = app.dataVersion
         let pages = app.allPages().filter {
-            filter.isEmpty || fuzzyMatch(query: filter, in: $0.displayName)
+            filter.isEmpty
+                || fuzzyMatch(query: filter, in: pageDisplayTitle($0.displayName))
+                || fuzzyMatch(query: filter, in: $0.displayName)
         }
-        let groups = Dictionary(grouping: pages) { listing in
+        let journals = pages.filter(\.isJournal).sorted {
+            ($0.journalDate ?? $0.nameKey) > ($1.journalDate ?? $1.nameKey)
+        }
+        let groups = Dictionary(grouping: pages.filter { !$0.isJournal }) { listing in
             PageName.segments(listing.displayName).count > 1
                 ? PageName.segments(listing.displayName)[0]
                 : ""
@@ -57,14 +62,26 @@ struct AllPagesView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
             List {
-                // Ungrouped pages first, then namespace groups.
+                if !journals.isEmpty {
+                    Section {
+                        sectionHeader("Journal")
+                        ForEach(journals, id: \.nameKey) { pageRow($0) }
+                    }
+                    .listSectionSeparator(.hidden)
+                }
                 if let flat = groups.first(where: { $0.key.isEmpty })?.value {
-                    ForEach(flat, id: \.nameKey) { pageRow($0) }
+                    Section {
+                        sectionHeader("Pages")
+                        ForEach(flat, id: \.nameKey) { pageRow($0) }
+                    }
+                    .listSectionSeparator(.hidden)
                 }
                 ForEach(groups.filter { !$0.key.isEmpty }, id: \.key) { (namespace, members) in
-                    Section(namespace) {
+                    Section {
+                        sectionHeader(namespace)
                         ForEach(members, id: \.nameKey) { pageRow($0) }
                     }
+                    .listSectionSeparator(.hidden)
                 }
             }
             .listStyle(.inset)
@@ -80,7 +97,7 @@ struct AllPagesView: View {
             HStack {
                 Image(systemName: listing.isJournal ? "calendar" : "doc.text")
                     .foregroundStyle(.secondary)
-                Text(listing.displayName)
+                Text(pageDisplayTitle(listing.displayName))
                 if !listing.fileExists {
                     Text("stub").font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -104,6 +121,21 @@ struct AllPagesView: View {
                 try? nav.deletePage(named: listing.displayName)
             }
         }
+    }
+
+    /// Native macOS `List` headers pin and draw a full-width bottom rule. This
+    /// first row inside each section scrolls normally and owns its inset rule.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .overlay(alignment: .bottom) { Divider() }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
     }
 
     private var newPageSheet: some View {

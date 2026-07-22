@@ -335,6 +335,14 @@ final class AppState: ObservableObject {
             PageListing(nameKey: PageName.key($0), displayName: $0, isJournal: false,
                         journalDate: nil, fileExists: false, blockCount: 0)
         }
+        // A canonical date key is the source of truth for journal identity.
+        // Normalize every listing, including cached file-less rows left from
+        // earlier in the session, rather than trusting its origin's metadata.
+        for index in listings.indices {
+            guard let journalDate = JournalDate(pageName: listings[index].nameKey) else { continue }
+            listings[index].isJournal = true
+            listings[index].journalDate = journalDate.pageName
+        }
         return listings.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
