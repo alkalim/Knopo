@@ -9,6 +9,7 @@ import Foundation
         var config = GraphConfig()
         config.rightPanes = ["page\tIdeas\t", "tag\tproject", "journalHome"]
         config.rightPaneFraction = 0.4
+        config.allPagesCollapsedSections = ["journal", "namespace\tProjects"]
 
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("knopo-cfg-\(UUID().uuidString)/config.json")
@@ -17,6 +18,10 @@ import Foundation
 
         expectEqual(loaded.rightPanes, config.rightPanes)
         expectEqual(loaded.rightPaneFraction, 0.4)
+        expectEqual(
+            loaded.allPagesCollapsedSections,
+            config.allPagesCollapsedSections
+        )
     }
 
     /// An older config file (no layout keys) still loads, with defaults — the
@@ -36,5 +41,6 @@ import Foundation
         expectEqual(loaded.theme, "dark")
         expectTrue(loaded.rightPanes.isEmpty)
         expectTrue(loaded.rightPaneFraction == nil)
+        expectTrue(loaded.allPagesCollapsedSections.isEmpty)
     }
 }

@@ -4,6 +4,20 @@ import KnopoCore
 /// Page browser. Namespaced pages (`Projects/Outliner`) are flat pages grouped
 /// hierarchically for display only (SPEC §3.2).
 struct AllPagesView: View {
+    private enum SectionID: Hashable {
+        case journal
+        case pages
+        case namespace(String)
+
+        var encoded: String {
+            switch self {
+            case .journal: return "journal"
+            case .pages: return "pages"
+            case .namespace(let name): return "namespace\t\(name)"
+            }
+        }
+    }
+
     @EnvironmentObject var app: AppState
     @EnvironmentObject var nav: Navigator
     /// In a right-sidebar pane the card header shows the "All Pages" title, so
@@ -62,26 +76,18 @@ struct AllPagesView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
             List {
-                if !journals.isEmpty {
-                    Section {
-                        sectionHeader("Journal")
-                        ForEach(journals, id: \.nameKey) { pageRow($0) }
-                    }
-                    .listSectionSeparator(.hidden)
-                }
                 if let flat = groups.first(where: { $0.key.isEmpty })?.value {
-                    Section {
-                        sectionHeader("Pages")
-                        ForEach(flat, id: \.nameKey) { pageRow($0) }
-                    }
-                    .listSectionSeparator(.hidden)
+                    pageSection("Pages", id: .pages, listings: flat)
                 }
                 ForEach(groups.filter { !$0.key.isEmpty }, id: \.key) { (namespace, members) in
-                    Section {
-                        sectionHeader(namespace)
-                        ForEach(members, id: \.nameKey) { pageRow($0) }
-                    }
-                    .listSectionSeparator(.hidden)
+                    pageSection(
+                        namespace,
+                        id: .namespace(namespace),
+                        listings: members
+                    )
+                }
+                if !journals.isEmpty {
+                    pageSection("Journal", id: .journal, listings: journals)
                 }
             }
             .listStyle(.inset)
@@ -123,19 +129,53 @@ struct AllPagesView: View {
         }
     }
 
+    private func pageSection(
+        _ title: String,
+        id: SectionID,
+        listings: [PageListing]
+    ) -> some View {
+        let collapsed = app.allPagesCollapsedSections.contains(id.encoded)
+        return Section {
+            sectionHeader(title, id: id)
+            if !filter.isEmpty || !collapsed {
+                ForEach(listings, id: \.nameKey) { pageRow($0) }
+            }
+        }
+        .listSectionSeparator(.hidden)
+    }
+
     /// Native macOS `List` headers pin and draw a full-width bottom rule. This
     /// first row inside each section scrolls normally and owns its inset rule.
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.headline)
-            .foregroundStyle(.secondary)
-            .accessibilityAddTraits(.isHeader)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-            .overlay(alignment: .bottom) { Divider() }
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
+    private func sectionHeader(_ title: String, id: SectionID) -> some View {
+        let collapsed = filter.isEmpty
+            && app.allPagesCollapsedSections.contains(id.encoded)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                app.toggleAllPagesSection(id.encoded)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 12)
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!filter.isEmpty)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .overlay(alignment: .bottom) { Divider() }
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
     }
 
     private var newPageSheet: some View {

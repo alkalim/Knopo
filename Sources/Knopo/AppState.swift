@@ -15,6 +15,8 @@ final class AppState: ObservableObject {
     /// Incremented when the underlying graph is replaced, so each window's
     /// Navigator can reset its navigation state.
     @Published var graphGeneration = 0
+    /// Shared by every All Pages view for this graph and persisted in config.
+    @Published private(set) var allPagesCollapsedSections: Set<String> = []
 
     /// Show faint `[[ ]]` around page references (per-app viewing preference).
     /// Mirrors UserDefaults, which `BlockRenderer` reads.
@@ -48,6 +50,7 @@ final class AppState: ObservableObject {
 
     init(store: GraphStore) {
         self.store = store
+        allPagesCollapsedSections = Set(store.config.allPagesCollapsedSections)
         store.onExternalChange = { [weak self] _ in
             self?.dataVersion += 1
         }
@@ -277,7 +280,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Right-sidebar layout (SPEC §12)
+    // MARK: - Persisted view layout (SPEC §12)
+
+    func toggleAllPagesSection(_ encoded: String) {
+        var collapsed = allPagesCollapsedSections
+        if collapsed.contains(encoded) {
+            collapsed.remove(encoded)
+        } else {
+            collapsed.insert(encoded)
+        }
+        allPagesCollapsedSections = collapsed
+        try? store.updateConfig {
+            $0.allPagesCollapsedSections = collapsed.sorted()
+        }
+    }
 
     /// Encoded open panes, persisted per graph. No `dataVersion` bump — this is
     /// pure layout, not graph data, so it shouldn't trigger view rebuilds.

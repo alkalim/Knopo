@@ -5,6 +5,31 @@ import KnopoCore
 
 @Suite struct NavigatorTests {
     @MainActor
+    @Test func allPagesCollapseStatePersistsPerGraph() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-all-pages-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try GraphStore(root: root)
+        try store.updateConfig {
+            $0.allPagesCollapsedSections = ["journal"]
+        }
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+
+        #expect(app.allPagesCollapsedSections == ["journal"])
+        app.toggleAllPagesSection("pages")
+        app.toggleAllPagesSection("journal")
+
+        #expect(app.allPagesCollapsedSections == ["pages"])
+        #expect(store.config.allPagesCollapsedSections == ["pages"])
+        #expect(
+            GraphConfig.load(from: store.configURL).allPagesCollapsedSections
+                == ["pages"]
+        )
+    }
+
+    @MainActor
     @Test func renamePageUpdatesRightSidebarTargets() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-navigator-\(UUID().uuidString)")

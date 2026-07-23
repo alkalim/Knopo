@@ -20,11 +20,14 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     /// so it scales with the window and restores at any window size; nil →
     /// proportional default. (Replaces the old points-based `rightPaneWidth`.)
     public var rightPaneFraction: Double?
+    /// Opaque app-layer identifiers for collapsed All Pages sections.
+    public var allPagesCollapsedSections: [String] = []
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
         case favourites, favouriteTags, dateFormat, theme, rightPanes, rightPaneFraction
+        case allPagesCollapsedSections
     }
 
     // Decode field-by-field so older config files (predating a field) still
@@ -37,6 +40,8 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
         rightPanes = try c.decodeIfPresent([String].self, forKey: .rightPanes) ?? []
         rightPaneFraction = try c.decodeIfPresent(Double.self, forKey: .rightPaneFraction)
+        allPagesCollapsedSections =
+            try c.decodeIfPresent([String].self, forKey: .allPagesCollapsedSections) ?? []
     }
 
     public static func load(from url: URL) -> GraphConfig {
