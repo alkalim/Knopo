@@ -439,7 +439,7 @@ The reference index updates incrementally on every block commit (debounced ~300 
 - **Right sidebar**: stack of panes opened via `Cmd+Click` (or `Shift+Click`) on any page/block reference or sidebar entry; each pane closable; resizable divider; used for side-by-side reference work. The open panes and the dragged divider width are persisted per graph in `config.json`, so a graph reopens with its right sidebar as left. Resizing the window scales the main view and the panel proportionally (their ratio holds); once the main view is at its minimum useable width, further narrowing shrinks only the panel.
 - **Windows**: each **window** shows one graph; different windows may show **different** graphs (e.g. a roadmap graph beside a work graph). A new window (`Cmd+N`) opens the last-used graph. Any windows showing the **same** graph share its data, undo stack, and index (the store is opened once per folder, never double-opened), while each keeps its own current page, navigation history, and right-sidebar panes.
 - **Open Graph (`Cmd+O`)**: pick or create a graph folder; it opens in (switches) the **focused window only**, leaving other windows on their graphs. The last graph opened is reopened on next launch. Precedence at launch: `KNOPO_GRAPH` env var → last opened → `~/Documents/Knopo`.
-- **Search (`Cmd+K`)**: single dialog combining fuzzy page-name match (top section) and full-text block search (below), with `Enter` to navigate and `Cmd+Enter` to open in right sidebar. Full-text index lives in `cache.db`. Block search is FTS5 **token-prefix** matching, so `log` matches `log`, `logsize`, `logging` (token starts) but not `catalog` (mid-word) — unlike `Cmd+F`'s substring match. The dialog is a fixed size (it does not resize as results change).
+- **Search (`Cmd+K`)**: single dialog combining fuzzy page-name match (top section) and fused lexical/semantic block search (below), with `Enter` to navigate and `Cmd+Enter` to open in right sidebar. Lexical search uses the FTS5 index in `cache.db` and **token-prefix** matching, so `log` matches `log`, `logsize`, `logging` (token starts) but not `catalog` (mid-word). On-device cosine rank adds blocks that match the query's meaning; reciprocal-rank fusion combines the two lists. If semantic embeddings are unavailable, search remains fully usable through FTS. The dialog is a fixed size (it does not resize as results change).
 - **Find in page (`Cmd+F`)**: a find bar scoped to the current view's outline(s) — matches the rendered (visible) text, highlights all matches with the current one emphasized, shows "n of m", and steps with `Cmd+G` / `Shift+Cmd+G`. On the journal home it spans all currently-rendered days. (Distinct from `Cmd+K`, which searches the whole graph via the index.)
 - **Breadcrumbs** when zoomed into a block: `Page › parent › parent`, each segment clickable.
 - Back/forward navigation history (`Cmd+[`, `Cmd+]`), per tab. The window/tab title shows the current page or section name.
@@ -484,6 +484,8 @@ Native macOS application written in **Swift**.
 | Block parser / serializer | Custom (§4.2 byte-stable round-trip requirement rules out off-the-shelf Markdown parsers) |
 | Inline Markdown tokenization (rendering) | Custom tokenizer; optionally `swift-markdown` (cmark) for standard inlines |
 | Index / cache (`cache.db`) | SQLite via GRDB; FTS5 for full-text search |
+| Semantic retrieval | `NLContextualEmbedding` (macOS 14+), mean-pooled vectors and brute-force cosine kNN |
+| Grounded answers | Foundation Models (`SystemLanguageModel`, macOS 26+), runtime availability-gated |
 | External-edit detection | FSEvents |
 | Fenced-code rendering | v1 renders monospace with the language tag shown but **no syntax highlighting** (Highlightr/tree-sitter deferred) |
 | Math (`$...$`) | **Slipped from v1**: rendered as styled monospace source, not typeset (SwiftMath deferred) |
@@ -518,3 +520,28 @@ Scope filters (`in-page` / `descendant-of`), journal-date ranges, output control
 
 - **Index completeness.** The `cache.db` block index stores, per block, everything a query filters on: page references, block references, tags, block properties (`key:: value`), the `TODO`/`DONE` keyword state, and the containing page's name and journal date.
 - **Tag model unaffected.** Tags remain labels (§8). Queries are the mechanism for tag intersections, tag + page-ref combinations, and (later) date-range filters — which is why none of those warrant page-like tag semantics.
+
+---
+
+## 18. On-device AI
+
+Knopo provides local semantic retrieval on macOS 14 and later and, where Apple Intelligence is available, grounded answers over the current graph. Neither capability requires an account, API key, telemetry, or a cloud service.
+
+### 18.1 Semantic retrieval and Related
+
+- Prose blocks are embedded with Apple's on-device `NLContextualEmbedding`. Empty/property-only blocks, horizontal rules, and fenced code are excluded. The app may ask the operating system to obtain Apple's model assets; graph text is not part of that asset request.
+- Mean-pooled vectors, their model identifier, and a stable content hash live in the rebuildable `block_embeddings` table in `.knopo/cache.db`. Saving or externally changing a page queues only missing, changed, or old-model blocks. Deleted blocks lose their vectors.
+- First-run backfill runs after the window becomes interactive, off the main actor, with visible progress. Failure never blocks launch or lexical search.
+- kNN is a capped linear cosine scan over local vectors. `Cmd+K` fuses semantic rank with FTS rank. A **Related** section below page content shows meaning-near blocks; when zoomed into one block, Related uses that block rather than the whole page.
+
+### 18.2 Ask Your Notes
+
+- `Shift+Cmd+A` opens one focused question sheet. There is no multi-turn memory, agent action, or graph editing.
+- Ask requires macOS 26, a supported Apple-silicon Mac, and Apple Intelligence enabled and ready. Knopo checks `SystemLanguageModel.default.availability` at runtime and explains the unavailable reason; the package deployment target remains macOS 14.
+- A first, notes-blind `LanguageModelSession` turns the natural-language question into a structured retrieval plan: a focused topic, requested evidence type, meaning-based queries, exact phrases, and high-signal terms. The raw conversational question is never passed to FTS or the embedding model. Invalid or empty plans fail explicitly; Knopo does not fall back to searching question words.
+- Ask runs exact-phrase, focused all-term, any-planned-term, and multi-query semantic channels, then combines their independent rankings with weighted reciprocal-rank fusion. It removes duplicate text and prefers evidence from more than one page. Up to six retrieved anchor blocks are kept; direct parents and children may expand the final evidence set to eight, each with its own block id.
+- A separate fresh on-device `LanguageModelSession` receives only the original question and evidence excerpts—planner output and page names are not generation input. Fenced code, property-only blocks, and evidence whose detected language the system model does not support are excluded. The entire user prompt has a conservative 2,600-byte ceiling (not a per-block allowance), and response tokens are capped. A context-window rejection automatically retries once in a fresh session with a 1,400-byte prompt and smaller response allowance; a language rejection retries with evidence whose individual sentences match the question language. Foundation Models structured generation returns concise claims whose citations include a one-based source number and a short verbatim supporting quotation. Knopo resolves each number against the fixed evidence set and verifies the quotation occurs in that exact source block after case/whitespace normalization. Invalid citations and unsupported claims are discarded. Accepted citations show their supporting text and navigate through `knopo://block/<id>`; if no claim survives, Knopo presents no generated answer.
+
+### 18.3 Privacy boundary
+
+Graph names, questions, blocks, vectors, prompts, and answers stay on the device. Knopo contains no AI network client, cloud fallback, telemetry path, or setting that can send note content away. The only possible download is an Apple-framework-managed model-asset request containing no graph content. Removing `.knopo/cache.db` deletes all derived vectors without affecting source Markdown.

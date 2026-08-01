@@ -52,7 +52,8 @@ public final class CacheDB {
     /// on next open. v2: recognize Logseq `yyyy_MM_dd` journal filenames.
     /// v3: canonicalize date page keys to ISO (cross-spelling journal refs).
     /// v6: recognize the friendly date form `Jun 10th, 2026` as a journal day.
-    public static let indexVersion: Int = 6
+    /// v7: record stable block-content hashes for incremental embeddings.
+    public static let indexVersion: Int = 7
 
     /// The index version this cache was last built with (PRAGMA user_version,
     /// independent of the schema migrator). 0 on a fresh/old database.
@@ -174,6 +175,23 @@ public final class CacheDB {
             try db.execute(
                 sql: "ALTER TABLE page_refs ADD COLUMN target_display TEXT NOT NULL DEFAULT ''")
         }
+        // On-device semantic index. Vectors are derived cache data and are kept
+        // outside `blocks` so page reindexing can retain unchanged embeddings.
+        migrator.registerMigration("v5-block-embeddings") { db in
+            try db.execute(sql: """
+                ALTER TABLE blocks ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+                CREATE TABLE block_embeddings (
+                    block_id TEXT PRIMARY KEY,
+                    page_key TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    dimension INTEGER NOT NULL,
+                    vector BLOB NOT NULL
+                );
+                CREATE INDEX block_embeddings_page ON block_embeddings(page_key);
+                CREATE INDEX block_embeddings_model ON block_embeddings(model_id, dimension);
+                """)
+        }
         try migrator.migrate(dbQueue)
     }
 
@@ -193,6 +211,13 @@ public final class CacheDB {
     public func indexPage(_ page: PageDocument, stamp: FileStamp?) throws {
         try dbQueue.write { db in
             let key = page.nameKey
+            // Unpersisted block ids are regenerated when a file is parsed in a
+            // later session. Snapshot derived rows before replacing the page so
+            // identical content can carry its vector to the new transient id.
+            let previousEmbeddings = try Row.fetchAll(db, sql: """
+                SELECT block_id, content_hash, model_id, dimension, vector
+                FROM block_embeddings WHERE page_key = ?
+                """, arguments: [key])
             try Self.deletePageRows(db, key: key)
             let journalDate = JournalDate(pageName: page.name)
             try db.execute(
@@ -216,12 +241,14 @@ public final class CacheDB {
                         try db.execute(
                             sql: """
                                 INSERT \(orIgnore ? "OR IGNORE " : "")INTO blocks
-                                (id, page_key, parent_id, position, depth, content, todo, collapsed)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                (id, page_key, parent_id, position, depth, content, content_hash,
+                                 todo, collapsed)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                             arguments: [
                                 bid, key, parent?.uuidString.lowercased(), position,
-                                depth, block.content, block.todoState?.rawValue,
+                                depth, block.content, embeddingContentHash(block.content),
+                                block.todoState?.rawValue,
                                 block.collapsed,
                             ]
                         )
@@ -287,11 +314,55 @@ public final class CacheDB {
                     arguments: [key, prop.key, prop.value]
                 )
             }
+            // Exact id/hash pairs already point at the right block. For new
+            // transient ids, copy one prior vector with the same text hash.
+            // Duplicate-content blocks are interchangeable here because their
+            // derived vectors are identical.
+            let currentBlocks = try Row.fetchAll(db, sql: """
+                SELECT id, content_hash FROM blocks WHERE page_key = ?
+                """, arguments: [key])
+            let exactPairs = Set(previousEmbeddings.map { row in
+                "\(row["block_id"] as String)\u{0}\(row["content_hash"] as String)"
+            })
+            var reusableByHash: [String: Row] = [:]
+            for row in previousEmbeddings {
+                let hash: String = row["content_hash"]
+                if reusableByHash[hash] == nil { reusableByHash[hash] = row }
+            }
+            for block in currentBlocks {
+                let id: String = block["id"]
+                let hash: String = block["content_hash"]
+                guard !exactPairs.contains("\(id)\u{0}\(hash)"),
+                      let old = reusableByHash[hash] else { continue }
+                let modelID: String = old["model_id"]
+                let dimension: Int = old["dimension"]
+                let vector: Data = old["vector"]
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO block_embeddings
+                        (block_id, page_key, content_hash, model_id, dimension, vector)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, arguments: [id, key, hash, modelID, dimension, vector])
+            }
+            // Drop deleted blocks and blocks that changed into non-prose. Rows
+            // for unchanged ids/content survive this page replacement and need
+            // no re-embedding.
+            try db.execute(sql: """
+                DELETE FROM block_embeddings
+                WHERE page_key = ? AND block_id NOT IN
+                    (SELECT id FROM blocks WHERE page_key = ?)
+                """, arguments: [key, key])
+            try db.execute(sql: """
+                DELETE FROM block_embeddings
+                WHERE page_key = ? AND block_id IN
+                    (SELECT id FROM blocks b WHERE b.page_key = ?
+                     AND NOT (\(embeddingEligibleSQL(alias: "b"))))
+                """, arguments: [key, key])
         }
     }
 
     public func removePage(key: String) throws {
         try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM block_embeddings WHERE page_key = ?", arguments: [key])
             try Self.deletePageRows(db, key: key)
             try db.execute(sql: "DELETE FROM recents WHERE page_key = ?", arguments: [key])
         }
@@ -340,7 +411,7 @@ public final class CacheDB {
 
     public func clearAll() throws {
         try dbQueue.write { db in
-            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {
+            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props", "block_embeddings"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
@@ -792,6 +863,31 @@ public final class CacheDB {
     public func searchBlocks(_ query: String, limit: Int = 50) throws -> [SearchHit] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
+        return try searchBlocks(matching: ftsPrefixQuery(q), limit: limit)
+    }
+
+    /// Exact phrase search used by Ask's planned lexical queries. This remains
+    /// separate from Cmd+K's token-prefix behavior.
+    public func searchBlocks(exactPhrase phrase: String, limit: Int = 50) throws -> [SearchHit] {
+        let phrase = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return [] }
+        return try searchBlocks(matching: ftsPhrase(phrase), limit: limit, eligibleOnly: true)
+    }
+
+    /// Broad recall channel for Ask. The terms have already been selected by
+    /// the local query planner; unlike the normal multiword FTS query, any one
+    /// of them may match. Multiword values remain exact phrases.
+    public func searchBlocks(anyOf terms: [String], limit: Int = 50) throws -> [SearchHit] {
+        let query = ftsAnyQuery(terms)
+        guard !query.isEmpty else { return [] }
+        return try searchBlocks(matching: query, limit: limit, eligibleOnly: true)
+    }
+
+    private func searchBlocks(
+        matching query: String, limit: Int, eligibleOnly: Bool = false
+    ) throws -> [SearchHit] {
+        guard limit > 0 else { return [] }
+        let eligibility = eligibleOnly ? "AND (\(embeddingEligibleSQL(alias: "b")))" : ""
         return try dbQueue.read { db in
             try Row.fetchAll(
                 db,
@@ -801,9 +897,10 @@ public final class CacheDB {
                     JOIN blocks b ON b.id = f.block_id
                     JOIN pages p ON p.name_key = f.page_key
                     WHERE blocks_fts MATCH ?
+                    \(eligibility)
                     ORDER BY rank LIMIT ?
                     """,
-                arguments: [ftsPrefixQuery(q), limit]
+                arguments: [query, limit]
             ).compactMap { row in
                 guard let uuid = UUID(uuidString: row["block_id"]) else { return nil }
                 return SearchHit(
@@ -814,6 +911,240 @@ public final class CacheDB {
                 )
             }
         }
+    }
+
+    /// Direct structural context for an Ask evidence block. Each returned row
+    /// keeps its own id so generated citations can point to the block that
+    /// actually contains the supporting quotation.
+    public func contextBlocks(around blockID: UUID, childLimit: Int = 2) throws -> [SearchHit] {
+        guard childLimit >= 0 else { return [] }
+        return try dbQueue.read { db in
+            guard let focus = try Row.fetchOne(db, sql: """
+                SELECT b.parent_id, b.page_key, p.display_name
+                FROM blocks b JOIN pages p ON p.name_key = b.page_key
+                WHERE b.id = ?
+                """, arguments: [blockID.uuidString.lowercased()]) else { return [] }
+            let pageKey: String = focus["page_key"]
+            let displayName: String = focus["display_name"]
+            var rows: [Row] = []
+            if let parentID: String = focus["parent_id"],
+               let parent = try Row.fetchOne(db, sql: """
+                   SELECT id, content FROM blocks WHERE id = ?
+                   """, arguments: [parentID]) {
+                rows.append(parent)
+            }
+            if childLimit > 0 {
+                rows += try Row.fetchAll(db, sql: """
+                    SELECT id, content FROM blocks
+                    WHERE parent_id = ? ORDER BY position LIMIT ?
+                    """, arguments: [blockID.uuidString.lowercased(), childLimit])
+            }
+            return rows.compactMap { row in
+                guard let id = UUID(uuidString: row["id"]) else { return nil }
+                return SearchHit(
+                    blockID: id, pageKey: pageKey,
+                    pageDisplayName: displayName, content: row["content"])
+            }
+        }
+    }
+
+    // MARK: - On-device semantic index
+
+    /// Missing or stale prose embeddings, in stable graph order. Fenced code,
+    /// horizontal rules, empty blocks, and property-only blocks are excluded as
+    /// retrieval noise. `modelID` invalidates vectors when Apple replaces the
+    /// selected on-device embedding model.
+    public func pendingEmbeddingInputs(
+        modelID: String, limit: Int = 32
+    ) throws -> [EmbeddingInput] {
+        guard limit > 0 else { return [] }
+        return try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT b.id, b.content, b.content_hash
+                FROM blocks b
+                LEFT JOIN block_embeddings e ON e.block_id = b.id
+                WHERE (\(embeddingEligibleSQL(alias: "b")))
+                  AND (e.block_id IS NULL OR e.content_hash <> b.content_hash OR e.model_id <> ?)
+                ORDER BY b.page_key, b.position
+                LIMIT ?
+                """, arguments: [modelID, limit]).compactMap { row in
+                    guard let id = UUID(uuidString: row["id"]) else { return nil }
+                    return EmbeddingInput(
+                        blockID: id, content: row["content"], contentHash: row["content_hash"])
+                }
+        }
+    }
+
+    public func embeddingIndexStatus(modelID: String) throws -> EmbeddingIndexStatus {
+        try dbQueue.read { db in
+            let total = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM blocks b WHERE \(embeddingEligibleSQL(alias: "b"))
+                """) ?? 0
+            let completed = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*)
+                FROM blocks b JOIN block_embeddings e ON e.block_id = b.id
+                WHERE (\(embeddingEligibleSQL(alias: "b")))
+                  AND e.content_hash = b.content_hash AND e.model_id = ?
+                """, arguments: [modelID]) ?? 0
+            return EmbeddingIndexStatus(completed: completed, total: total)
+        }
+    }
+
+    /// Tight page-sized query text for the Related surface. It uses the same
+    /// prose filter as backfill and caps input before NaturalLanguage's own
+    /// token truncation.
+    public func embeddingText(forPageKey pageKey: String, characterLimit: Int = 4_000) throws -> String {
+        guard characterLimit > 0 else { return "" }
+        return try dbQueue.read { db in
+            let contents = try String.fetchAll(db, sql: """
+                SELECT b.content FROM blocks b
+                WHERE b.page_key = ? AND (\(embeddingEligibleSQL(alias: "b")))
+                ORDER BY b.position
+                """, arguments: [pageKey])
+            var result = ""
+            for content in contents {
+                let separator = result.isEmpty ? "" : "\n"
+                let room = characterLimit - result.count - separator.count
+                guard room > 0 else { break }
+                result += separator + String(content.prefix(room))
+            }
+            return result
+        }
+    }
+
+    /// Commits a vector only if the indexed block still has the content that
+    /// was embedded. This closes the race with a save or external edit while a
+    /// background embedding calculation is in flight.
+    public func storeEmbedding(
+        _ vector: [Float], for input: EmbeddingInput, modelID: String
+    ) throws {
+        guard !vector.isEmpty, vector.allSatisfy(\.isFinite) else { return }
+        try writeEmbedding(
+            vectorData(vector), dimension: vector.count, input: input, modelID: modelID)
+    }
+
+    /// Marks text the current system model could not represent. It is still
+    /// retried after either the text or model revision changes, without making
+    /// every background backfill spin forever on the same block.
+    public func skipEmbedding(_ input: EmbeddingInput, modelID: String) throws {
+        try writeEmbedding(Data(), dimension: 0, input: input, modelID: modelID)
+    }
+
+    private func writeEmbedding(
+        _ data: Data, dimension: Int, input: EmbeddingInput, modelID: String
+    ) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO block_embeddings
+                    (block_id, page_key, content_hash, model_id, dimension, vector)
+                SELECT id, page_key, content_hash, ?, ?, ? FROM blocks
+                WHERE id = ? AND content_hash = ?
+                """, arguments: [
+                    modelID, dimension, data,
+                    input.blockID.uuidString.lowercased(), input.contentHash,
+                ])
+        }
+    }
+
+    /// Brute-force cosine kNN over a capped number of on-device vectors. Typical
+    /// graphs are tens of thousands of blocks; revisit the 100k cap only if real
+    /// graph sizes make a SQLite vector extension worthwhile.
+    public func semanticSearch(
+        vector query: [Float], modelID: String, limit: Int = 50,
+        excludingPageKey: String? = nil, excludingBlockID: UUID? = nil,
+        minimumScore: Float? = nil
+    ) throws -> [SemanticHit] {
+        guard !query.isEmpty, limit > 0 else { return [] }
+        let rows = try dbQueue.read { db in
+            var predicate = "e.model_id = ? AND e.dimension = ?"
+            var args: [DatabaseValueConvertible] = [modelID, query.count]
+            if let excludingPageKey {
+                predicate += " AND b.page_key <> ?"
+                args.append(excludingPageKey)
+            }
+            if let excludingBlockID {
+                predicate += " AND b.id <> ?"
+                args.append(excludingBlockID.uuidString.lowercased())
+            }
+            return try Row.fetchAll(db, sql: """
+                SELECT b.id, b.page_key, b.content, p.display_name, e.vector
+                FROM block_embeddings e
+                JOIN blocks b ON b.id = e.block_id
+                JOIN pages p ON p.name_key = b.page_key
+                WHERE \(predicate)
+                LIMIT 100000
+                """, arguments: StatementArguments(args))
+        }
+        var hits: [(hit: SearchHit, vector: [Float])] = []
+        hits.reserveCapacity(rows.count)
+        for row in rows {
+            guard let id = UUID(uuidString: row["id"]),
+                  let vector = decodeVector(row["vector"]), vector.count == query.count else { continue }
+            hits.append((SearchHit(
+                blockID: id, pageKey: row["page_key"],
+                pageDisplayName: row["display_name"], content: row["content"]), vector))
+        }
+        return SemanticRanker.nearest(
+            to: query, among: hits.map { ($0.hit.blockID, $0.vector) }, limit: limit
+        ).compactMap { ranked in
+            guard minimumScore.map({ ranked.score >= $0 }) ?? true,
+                  let hit = hits.first(where: { $0.hit.blockID == ranked.id })?.hit else { return nil }
+            return SemanticHit(hit: hit, score: ranked.score)
+        }
+    }
+
+    /// Fuses one raw FTS query and one semantic query for Cmd+K. Ask uses the
+    /// separately planned multi-query path below.
+    public func retrieve(
+        _ query: String, semanticVector: [Float]?, modelID: String?, limit: Int = 20
+    ) throws -> [SearchHit] {
+        guard limit > 0 else { return [] }
+        let lexical = (try? searchBlocks(query, limit: max(50, limit * 4))) ?? []
+        let semantic: [SemanticHit]
+        if let semanticVector, let modelID {
+            semantic = try semanticSearch(
+                vector: semanticVector, modelID: modelID, limit: max(50, limit * 4))
+        } else {
+            semantic = []
+        }
+        let byID = Dictionary(
+            (lexical + semantic.map(\.hit)).map { ($0.blockID, $0) },
+            uniquingKeysWith: { first, _ in first })
+        return SemanticRanker.fuse(
+            lexical: lexical.map(\.blockID), semantic: semantic.map(\.hit.blockID), limit: limit
+        ).compactMap { byID[$0] }
+    }
+
+    /// Ask-specific candidate generation from an already validated local-model
+    /// plan. There is intentionally no natural-language question parameter:
+    /// conversational framing cannot accidentally leak back into retrieval.
+    public func retrievePlanned(
+        phrases: [String], lexicalTerms: [String], semanticVectors: [[Float]],
+        modelID: String?, limit: Int = 80
+    ) throws -> [SearchHit] {
+        guard limit > 0 else { return [] }
+        var rankedLists: [(ids: [UUID], weight: Double)] = []
+        var hitsByID: [UUID: SearchHit] = [:]
+        func add(_ hits: [SearchHit], weight: Double) {
+            guard !hits.isEmpty else { return }
+            for hit in hits where hitsByID[hit.blockID] == nil { hitsByID[hit.blockID] = hit }
+            rankedLists.append((ids: hits.map(\.blockID), weight: weight))
+        }
+        for phrase in phrases {
+            add(try searchBlocks(exactPhrase: phrase, limit: 40), weight: 1.8)
+            add(try searchBlocks(
+                matching: ftsPrefixQuery(phrase), limit: 40, eligibleOnly: true), weight: 1.25)
+        }
+        add(try searchBlocks(anyOf: lexicalTerms, limit: 60), weight: 0.7)
+        if let modelID {
+            for vector in semanticVectors {
+                add(try semanticSearch(
+                    vector: vector, modelID: modelID, limit: 60, minimumScore: 0.15)
+                    .map(\.hit), weight: 1.25)
+            }
+        }
+        return SemanticRanker.fuse(rankedLists: rankedLists, limit: limit)
+            .compactMap { hitsByID[$0] }
     }
 
     // MARK: - Recents (SPEC §11.2)
@@ -878,6 +1209,32 @@ public final class CacheDB {
     }
 }
 
+private func vectorData(_ vector: [Float]) -> Data {
+    var data = Data(capacity: vector.count * MemoryLayout<UInt32>.size)
+    for value in vector {
+        var bits = value.bitPattern.littleEndian
+        withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+    }
+    return data
+}
+
+private func decodeVector(_ data: Data) -> [Float]? {
+    let width = MemoryLayout<UInt32>.size
+    guard !data.isEmpty, data.count.isMultiple(of: width) else { return nil }
+    var vector: [Float] = []
+    vector.reserveCapacity(data.count / width)
+    var offset = 0
+    while offset < data.count {
+        var bits: UInt32 = 0
+        _ = withUnsafeMutableBytes(of: &bits) { destination in
+            data.copyBytes(to: destination, from: offset..<(offset + width))
+        }
+        vector.append(Float(bitPattern: UInt32(littleEndian: bits)))
+        offset += width
+    }
+    return vector
+}
+
 // MARK: - FTS query helpers
 
 /// Quotes user input as an FTS5 phrase with prefix matching on the last token.
@@ -895,6 +1252,23 @@ func ftsPrefixQuery(_ input: String) -> String {
 /// Quotes a page name as an exact FTS5 phrase.
 func ftsPhrase(_ input: String) -> String {
     "\"" + input.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+}
+
+/// OR query over planner-selected terms. Values are quoted as phrases so
+/// punctuation is data rather than FTS syntax; duplicates are removed without
+/// disturbing the planner's priority order.
+func ftsAnyQuery(_ inputs: [String]) -> String {
+    var seen = Set<String>()
+    var phrases: [String] = []
+    for input in inputs {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { continue }
+        let key = trimmed.folding(
+            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        guard seen.insert(key).inserted else { continue }
+        phrases.append(ftsPhrase(trimmed))
+    }
+    return phrases.joined(separator: " OR ")
 }
 
 func likePrefix(_ input: String) -> String {

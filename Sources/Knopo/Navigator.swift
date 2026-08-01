@@ -14,6 +14,7 @@ final class Navigator: ObservableObject {
         didSet { if restored { app.persistRightPanes(rightPanes.map(\.encoded)) } }
     }
     @Published var searchPresented = false
+    @Published var askPresented = false
 
     /// Page name whose first block the outline should focus once it loads — set
     /// right after creating a page so you can start typing immediately. The

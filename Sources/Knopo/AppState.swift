@@ -15,6 +15,13 @@ final class AppState: ObservableObject {
     /// Incremented when the underlying graph is replaced, so each window's
     /// Navigator can reset its navigation state.
     @Published var graphGeneration = 0
+    /// Nil until the background semantic model starts; then tracks its
+    /// rebuildable, per-block cache progress for Related/search UI.
+    @Published private(set) var embeddingIndexStatus: EmbeddingIndexStatus?
+    /// Bumped after embedding batches so Related surfaces can refresh as the
+    /// first-run index fills without tying themselves to every progress label.
+    @Published private(set) var semanticDataVersion = 0
+    @Published private(set) var semanticUnavailableReason: String?
     /// Shared by every All Pages view for this graph and persisted in config.
     @Published private(set) var allPagesCollapsedSections: Set<String> = []
 
@@ -31,6 +38,10 @@ final class AppState: ObservableObject {
 
     private var watcher: FileWatcher?
     private var pendingSaves: [String: DispatchWorkItem] = [:]
+    private let localAI: OnDeviceAIService
+    private var localAIStarted = false
+    private var embeddingBackfillTask: Task<Void, Never>?
+    private var embeddingBackfillGeneration = 0
 
     // Memoized journal-home day list (see `journalDays()`): rebuilt only when
     // the day *set* changes, not on every content edit.
@@ -64,9 +75,11 @@ final class AppState: ObservableObject {
 
     init(store: GraphStore) {
         self.store = store
+        self.localAI = OnDeviceAIService(cache: store.cache)
         allPagesCollapsedSections = Set(store.config.allPagesCollapsedSections)
         store.onExternalChange = { [weak self] _ in
             self?.dataVersion += 1
+            self?.restartEmbeddingBackfillIfStarted()
         }
         let watcher = FileWatcher(
             paths: [store.pagesDir.path, store.journalsDir.path]
@@ -86,12 +99,69 @@ final class AppState: ObservableObject {
     /// flush unsaved edits and stop watching the old directory.
     func shutdown() {
         flushPendingSaves()
+        embeddingBackfillTask?.cancel()
+        embeddingBackfillTask = nil
         watcher?.stop()
         watcher = nil
         dayRollover?.cancel()
         dayRollover = nil
         dayObservers.forEach(NotificationCenter.default.removeObserver)
         dayObservers = []
+    }
+
+    // MARK: - On-device AI
+
+    /// Starts the potentially slow first-run embedding fill. MainWindow calls
+    /// this after appearing so GraphStore construction and app launch remain
+    /// synchronous and fast; all model work stays off the main actor.
+    func startLocalAI() {
+        guard !localAIStarted else { return }
+        localAIStarted = true
+        restartEmbeddingBackfillIfStarted()
+    }
+
+    private func restartEmbeddingBackfillIfStarted() {
+        guard localAIStarted else { return }
+        embeddingBackfillTask?.cancel()
+        embeddingBackfillGeneration += 1
+        let generation = embeddingBackfillGeneration
+        let service = localAI
+        semanticUnavailableReason = nil
+        embeddingBackfillTask = Task { [weak self] in
+            let unavailableReason = await service.backfill { [weak self] status in
+                guard let self, self.embeddingBackfillGeneration == generation else { return }
+                let completedChanged = self.embeddingIndexStatus?.completed != status.completed
+                self.embeddingIndexStatus = status
+                if completedChanged { self.semanticDataVersion += 1 }
+            }
+            guard let self, self.embeddingBackfillGeneration == generation else { return }
+            self.semanticUnavailableReason = unavailableReason
+            self.embeddingBackfillTask = nil
+        }
+    }
+
+    func retrieve(_ query: String, limit: Int = 20) async -> [SearchHit] {
+        startLocalAI()
+        return await localAI.retrieve(query, limit: limit)
+    }
+
+    func related(
+        toPageNamed name: String, blockID: UUID? = nil, limit: Int = 6
+    ) async -> [SemanticHit] {
+        startLocalAI()
+        let blockText = blockID.flatMap { store.resolveBlock($0)?.block.content }
+        return await localAI.related(
+            toPageKey: PageName.key(name), blockID: blockID,
+            blockText: blockText, limit: limit)
+    }
+
+    func askAvailability() async -> AskAvailability {
+        await localAI.askAvailability()
+    }
+
+    func answerNotesQuestion(_ question: String) async throws -> GroundedAnswer {
+        startLocalAI()
+        return try await localAI.answer(question)
     }
 
     // MARK: - Day rollover
@@ -222,6 +292,7 @@ final class AppState: ObservableObject {
             self.pendingSaves[key] = nil
             try? self.store.savePage(named: name)
             self.dataVersion += 1
+            self.restartEmbeddingBackfillIfStarted()
         }
         pendingSaves[key] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
@@ -235,16 +306,21 @@ final class AppState: ObservableObject {
         pendingSaves[key] = nil
         try? store.savePage(named: name)
         dataVersion += 1
+        restartEmbeddingBackfillIfStarted()
     }
 
     func flushPendingSaves() {
+        let savedAny = !pendingSaves.isEmpty
         for (key, work) in pendingSaves {
             work.cancel()
             if let doc = storeLoadedDoc(key) {
                 try? store.savePage(named: doc.name)
             }
         }
-        if !pendingSaves.isEmpty { dataVersion += 1 }
+        if savedAny {
+            dataVersion += 1
+            restartEmbeddingBackfillIfStarted()
+        }
         pendingSaves = [:]
     }
 
@@ -269,6 +345,7 @@ final class AppState: ObservableObject {
         }
         redoStack.append(entry)
         dataVersion += 1
+        restartEmbeddingBackfillIfStarted()
     }
 
     func redo() {
@@ -280,6 +357,7 @@ final class AppState: ObservableObject {
         }
         undoStack.append(entry)
         dataVersion += 1
+        restartEmbeddingBackfillIfStarted()
     }
 
     // MARK: - Page operations
@@ -295,6 +373,7 @@ final class AppState: ObservableObject {
         flushPendingSaves()
         _ = try store.renamePage(from: old, to: new)
         dataVersion += 1
+        restartEmbeddingBackfillIfStarted()
         return true
     }
 
@@ -304,6 +383,7 @@ final class AppState: ObservableObject {
         flushPendingSaves()
         _ = try store.renameTag(from: old, to: new)
         dataVersion += 1
+        restartEmbeddingBackfillIfStarted()
     }
 
     func deletePage(named name: String) throws {

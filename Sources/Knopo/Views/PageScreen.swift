@@ -36,6 +36,7 @@ struct PageScreen: View {
             OutlineEditorView(pageName: pageName, zoom: zoom, inPane: inPane)
             if !inPane {
                 Divider().padding(.vertical, 8)
+                RelatedSection(pageName: pageName, blockID: zoom)
                 ReferencesSection(pageName: pageName)
             }
         }

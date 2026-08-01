@@ -77,7 +77,13 @@ struct MainWindow: View {
                 .environmentObject(app)
                 .environmentObject(nav)
         }
+        .sheet(isPresented: $nav.askPresented) {
+            AskPanel()
+                .environmentObject(app)
+                .environmentObject(nav)
+        }
         .onAppear {
+            app.startLocalAI()
             // Restore the saved right-sidebar width fraction for this graph (§12).
             if rightFraction == nil, let saved = app.store.config.rightPaneFraction {
                 rightFraction = CGFloat(saved)

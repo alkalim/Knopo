@@ -1,7 +1,7 @@
 import SwiftUI
 import KnopoCore
 
-/// Cmd+K: fuzzy page-name match on top, full-text block search below.
+/// Cmd+K: fuzzy page-name match on top, fused lexical/semantic block search below.
 /// Enter navigates, Cmd+Enter opens in the right sidebar (SPEC §12).
 struct SearchPalette: View {
     @EnvironmentObject var app: AppState
@@ -10,6 +10,8 @@ struct SearchPalette: View {
 
     @State private var query = ""
     @State private var selection = 0
+    @State private var rankedHits: [SearchHit] = []
+    @State private var rankedQuery = ""
     @FocusState private var fieldFocused: Bool
 
     private enum Result {
@@ -72,6 +74,22 @@ struct SearchPalette: View {
         .frame(width: 560)
         .onAppear { fieldFocused = true }
         .onChange(of: query) { _, _ in selection = 0 }
+        .task(id: "\(query)#\(app.semanticDataVersion)") {
+            let requested = query
+            guard !requested.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                rankedHits = []
+                rankedQuery = ""
+                return
+            }
+            // Avoid running the contextual model for every intermediate
+            // keystroke while the user is typing quickly.
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            let hits = await app.retrieve(requested, limit: 20)
+            guard !Task.isCancelled, query == requested else { return }
+            rankedHits = hits
+            rankedQuery = requested
+        }
     }
 
     private func computeResults() -> [Result] {
@@ -85,7 +103,11 @@ struct SearchPalette: View {
         if !exactExists, PageName.isValid(query) {
             results.append(.createPage(query))
         }
-        let hits = (try? app.store.cache.searchBlocks(query, limit: 20)) ?? []
+        // Show immediate FTS results while the on-device query vector is being
+        // computed, then replace them with the fused order.
+        let hits = rankedQuery == query
+            ? rankedHits
+            : ((try? app.store.cache.searchBlocks(query, limit: 20)) ?? [])
         results += hits.map { .block($0) }
         return results
     }

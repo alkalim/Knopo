@@ -508,6 +508,9 @@ private struct NavigationCommands: Commands {
             Button("Search") { nav?.searchPresented = true }
                 .keyboardShortcut("k")
                 .disabled(nav == nil)
+            Button("Ask Your Notes") { nav?.askPresented = true }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(nav == nil)
             Divider()
             Button("Find in Page") { nav?.openFind() }
                 .keyboardShortcut("f")
