@@ -49,7 +49,7 @@ import Testing
         expectTrue(try cache.searchBlocks(anyOf: []).isEmpty)
     }
 
-    @Test func plannedAskRetrievalNeverNeedsTheConversationalQuestion() throws {
+    @Test func focusedAskRetrievalNeverNeedsTheConversationalQuestion() throws {
         let anomaly = Block(content: "anomaly detection for time series")
         let outlier = Block(content: "outlier screening in telemetry")
         let filler = Block(content: "show me some cool notes about work")
@@ -63,10 +63,10 @@ import Testing
             try cache.storeEmbedding(vector, for: input, modelID: model)
         }
 
-        let hits = try cache.retrievePlanned(
+        let hits = try cache.retrieveFocused(
             phrases: ["anomaly detection"],
             lexicalTerms: ["anomaly", "detection", "outlier"],
-            semanticVectors: [[1, 0]], modelID: model)
+            semanticVector: [1, 0], modelID: model)
 
         expectEqual(hits.first?.blockID, anomaly.id)
         expectTrue(hits.contains { $0.blockID == outlier.id })

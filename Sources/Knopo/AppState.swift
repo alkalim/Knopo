@@ -160,8 +160,14 @@ final class AppState: ObservableObject {
     }
 
     func answerNotesQuestion(_ question: String) async throws -> GroundedAnswer {
+        let requestID = String(UUID().uuidString.prefix(8)).lowercased()
+        let submittedAt = AIPerformanceLog.now()
+        AIPerformanceLog.emit(
+            requestID: requestID, event: "request.submitted",
+            fields: ["question_utf8=\(question.utf8.count)"])
         startLocalAI()
-        return try await localAI.answer(question)
+        return try await localAI.answer(
+            question, requestID: requestID, submittedAt: submittedAt)
     }
 
     // MARK: - Day rollover

@@ -1,6 +1,44 @@
 import Foundation
 import GRDB
 
+private enum CacheAIPerformanceLog {
+    private static let isEnabled =
+        ProcessInfo.processInfo.environment["KNOPO_AI_PERF"] == "1"
+
+    static func now() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
+    }
+
+    static func milliseconds(from start: UInt64, to end: UInt64? = nil) -> Double {
+        let end = end ?? now()
+        guard end >= start else { return 0 }
+        return Double(end - start) / 1_000_000
+    }
+
+    static func emit(
+        requestID: String?, event: String, startedAt: UInt64? = nil,
+        fields: [String] = []
+    ) {
+        guard isEnabled, let requestID else { return }
+        let timestamp = now()
+        var parts = [
+            "KNOPO_AI_PERF",
+            "request=\(requestID)",
+            "event=\(event)",
+            "uptime_ms=\(format(Double(timestamp) / 1_000_000))",
+        ]
+        if let startedAt {
+            parts.append("duration_ms=\(format(milliseconds(from: startedAt, to: timestamp)))")
+        }
+        parts.append(contentsOf: fields)
+        print(parts.joined(separator: " "))
+    }
+
+    private static func format(_ value: Double) -> String {
+        String(format: "%.3f", value)
+    }
+}
+
 /// One row of backlink lookup: a block somewhere in the graph that references
 /// the page in question (SPEC §9.1).
 public struct BacklinkHit: Equatable, Sendable {
@@ -875,7 +913,7 @@ public final class CacheDB {
     }
 
     /// Broad recall channel for Ask. The terms have already been selected by
-    /// the local query planner; unlike the normal multiword FTS query, any one
+    /// local query analysis; unlike the normal multiword FTS query, any one
     /// of them may match. Multiword values remain exact phrases.
     public func searchBlocks(anyOf terms: [String], limit: Int = 50) throws -> [SearchHit] {
         let query = ftsAnyQuery(terms)
@@ -915,7 +953,7 @@ public final class CacheDB {
 
     /// Direct structural context for an Ask evidence block. Each returned row
     /// keeps its own id so generated citations can point to the block that
-    /// actually contains the supporting quotation.
+    /// actually contains the supporting evidence sentence.
     public func contextBlocks(around blockID: UUID, childLimit: Int = 2) throws -> [SearchHit] {
         guard childLimit >= 0 else { return [] }
         return try dbQueue.read { db in
@@ -1052,9 +1090,19 @@ public final class CacheDB {
     public func semanticSearch(
         vector query: [Float], modelID: String, limit: Int = 50,
         excludingPageKey: String? = nil, excludingBlockID: UUID? = nil,
-        minimumScore: Float? = nil
+        minimumScore: Float? = nil, performanceRequestID: String? = nil,
+        performanceQueryIndex: Int? = nil
     ) throws -> [SemanticHit] {
         guard !query.isEmpty, limit > 0 else { return [] }
+        let totalStarted = CacheAIPerformanceLog.now()
+        var initialFields = ["dimension=\(query.count)"]
+        if let performanceQueryIndex {
+            initialFields.append("query_index=\(performanceQueryIndex)")
+        }
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "semantic.started",
+            fields: initialFields)
+        let sqliteStarted = CacheAIPerformanceLog.now()
         let rows = try dbQueue.read { db in
             var predicate = "e.model_id = ? AND e.dimension = ?"
             var args: [DatabaseValueConvertible] = [modelID, query.count]
@@ -1075,26 +1123,62 @@ public final class CacheDB {
                 LIMIT 100000
                 """, arguments: StatementArguments(args))
         }
+        var commonFields = ["rows=\(rows.count)", "dimension=\(query.count)"]
+        if let performanceQueryIndex {
+            commonFields.append("query_index=\(performanceQueryIndex)")
+        }
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "semantic.sqlite_complete",
+            startedAt: sqliteStarted, fields: commonFields)
+        let decodeStarted = CacheAIPerformanceLog.now()
         var hits: [(hit: SearchHit, vector: [Float])] = []
         hits.reserveCapacity(rows.count)
+        var vectorBytes = 0
         for row in rows {
+            let data: Data = row["vector"]
+            vectorBytes += data.count
             guard let id = UUID(uuidString: row["id"]),
-                  let vector = decodeVector(row["vector"]), vector.count == query.count else { continue }
+                  let vector = decodeVector(data), vector.count == query.count else { continue }
             hits.append((SearchHit(
                 blockID: id, pageKey: row["page_key"],
                 pageDisplayName: row["display_name"], content: row["content"]), vector))
         }
-        return SemanticRanker.nearest(
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "semantic.decode_complete",
+            startedAt: decodeStarted,
+            fields: commonFields + [
+                "decoded=\(hits.count)", "vector_bytes=\(vectorBytes)",
+            ])
+        let rankStarted = CacheAIPerformanceLog.now()
+        let ranked = SemanticRanker.nearest(
             to: query, among: hits.map { ($0.hit.blockID, $0.vector) }, limit: limit
-        ).compactMap { ranked in
+        )
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "semantic.rank_complete",
+            startedAt: rankStarted,
+            fields: commonFields + ["ranked=\(ranked.count)"])
+        let materializeStarted = CacheAIPerformanceLog.now()
+        let hitsByID = Dictionary(
+            hits.map { ($0.hit.blockID, $0.hit) },
+            uniquingKeysWith: { first, _ in first })
+        let result: [SemanticHit] = ranked.compactMap { ranked in
             guard minimumScore.map({ ranked.score >= $0 }) ?? true,
-                  let hit = hits.first(where: { $0.hit.blockID == ranked.id })?.hit else { return nil }
+                  let hit = hitsByID[ranked.id] else { return nil }
             return SemanticHit(hit: hit, score: ranked.score)
         }
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "semantic.materialize_complete",
+            startedAt: materializeStarted,
+            fields: commonFields + ["results=\(result.count)"])
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "semantic.complete",
+            startedAt: totalStarted,
+            fields: commonFields + ["results=\(result.count)"])
+        return result
     }
 
     /// Fuses one raw FTS query and one semantic query for Cmd+K. Ask uses the
-    /// separately planned multi-query path below.
+    /// separately focused retrieval path below.
     public func retrieve(
         _ query: String, semanticVector: [Float]?, modelID: String?, limit: Int = 20
     ) throws -> [SearchHit] {
@@ -1115,14 +1199,22 @@ public final class CacheDB {
         ).compactMap { byID[$0] }
     }
 
-    /// Ask-specific candidate generation from an already validated local-model
-    /// plan. There is intentionally no natural-language question parameter:
+    /// Ask-specific candidate generation from an already focused local query.
+    /// There is intentionally no natural-language question parameter:
     /// conversational framing cannot accidentally leak back into retrieval.
-    public func retrievePlanned(
-        phrases: [String], lexicalTerms: [String], semanticVectors: [[Float]],
-        modelID: String?, limit: Int = 80
+    public func retrieveFocused(
+        phrases: [String], lexicalTerms: [String], semanticVector: [Float]?,
+        modelID: String?, limit: Int = 80, performanceRequestID: String? = nil
     ) throws -> [SearchHit] {
         guard limit > 0 else { return [] }
+        let totalStarted = CacheAIPerformanceLog.now()
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "retrieval.focused_started",
+            fields: [
+                "phrases=\(phrases.count)",
+                "terms=\(lexicalTerms.count)",
+                "semantic_queries=\(semanticVector == nil ? 0 : 1)",
+            ])
         var rankedLists: [(ids: [UUID], weight: Double)] = []
         var hitsByID: [UUID: SearchHit] = [:]
         func add(_ hits: [SearchHit], weight: Double) {
@@ -1130,21 +1222,60 @@ public final class CacheDB {
             for hit in hits where hitsByID[hit.blockID] == nil { hitsByID[hit.blockID] = hit }
             rankedLists.append((ids: hits.map(\.blockID), weight: weight))
         }
-        for phrase in phrases {
-            add(try searchBlocks(exactPhrase: phrase, limit: 40), weight: 1.8)
-            add(try searchBlocks(
-                matching: ftsPrefixQuery(phrase), limit: 40, eligibleOnly: true), weight: 1.25)
+        for (index, phrase) in phrases.enumerated() {
+            let exactStarted = CacheAIPerformanceLog.now()
+            let exact = try searchBlocks(exactPhrase: phrase, limit: 40)
+            CacheAIPerformanceLog.emit(
+                requestID: performanceRequestID, event: "retrieval.fts_exact",
+                startedAt: exactStarted,
+                fields: [
+                    "query_index=\(index)", "query_utf8=\(phrase.utf8.count)",
+                    "results=\(exact.count)",
+                ])
+            add(exact, weight: 1.8)
+            let prefixStarted = CacheAIPerformanceLog.now()
+            let prefix = try searchBlocks(
+                matching: ftsPrefixQuery(phrase), limit: 40, eligibleOnly: true)
+            CacheAIPerformanceLog.emit(
+                requestID: performanceRequestID, event: "retrieval.fts_prefix",
+                startedAt: prefixStarted,
+                fields: [
+                    "query_index=\(index)", "query_utf8=\(phrase.utf8.count)",
+                    "results=\(prefix.count)",
+                ])
+            add(prefix, weight: 1.25)
         }
-        add(try searchBlocks(anyOf: lexicalTerms, limit: 60), weight: 0.7)
-        if let modelID {
-            for vector in semanticVectors {
-                add(try semanticSearch(
-                    vector: vector, modelID: modelID, limit: 60, minimumScore: 0.15)
-                    .map(\.hit), weight: 1.25)
-            }
+        let termsStarted = CacheAIPerformanceLog.now()
+        let termHits = try searchBlocks(anyOf: lexicalTerms, limit: 60)
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "retrieval.fts_terms",
+            startedAt: termsStarted,
+            fields: ["terms=\(lexicalTerms.count)", "results=\(termHits.count)"])
+        add(termHits, weight: 0.7)
+        if let modelID, let semanticVector {
+            add(try semanticSearch(
+                vector: semanticVector, modelID: modelID, limit: 60, minimumScore: 0.15,
+                performanceRequestID: performanceRequestID,
+                performanceQueryIndex: 0)
+                .map(\.hit), weight: 1.25)
         }
-        return SemanticRanker.fuse(rankedLists: rankedLists, limit: limit)
+        let fusionStarted = CacheAIPerformanceLog.now()
+        let fused = SemanticRanker.fuse(rankedLists: rankedLists, limit: limit)
             .compactMap { hitsByID[$0] }
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "retrieval.fusion_complete",
+            startedAt: fusionStarted,
+            fields: ["ranked_lists=\(rankedLists.count)", "results=\(fused.count)"])
+        CacheAIPerformanceLog.emit(
+            requestID: performanceRequestID, event: "retrieval.focused_complete",
+            startedAt: totalStarted,
+            fields: [
+                "phrases=\(phrases.count)",
+                "terms=\(lexicalTerms.count)",
+                "semantic_queries=\(semanticVector == nil ? 0 : 1)",
+                "results=\(fused.count)",
+            ])
+        return fused
     }
 
     // MARK: - Recents (SPEC §11.2)
@@ -1221,17 +1352,15 @@ private func vectorData(_ vector: [Float]) -> Data {
 private func decodeVector(_ data: Data) -> [Float]? {
     let width = MemoryLayout<UInt32>.size
     guard !data.isEmpty, data.count.isMultiple(of: width) else { return nil }
-    var vector: [Float] = []
-    vector.reserveCapacity(data.count / width)
-    var offset = 0
-    while offset < data.count {
-        var bits: UInt32 = 0
-        _ = withUnsafeMutableBytes(of: &bits) { destination in
-            data.copyBytes(to: destination, from: offset..<(offset + width))
-        }
-        vector.append(Float(bitPattern: UInt32(littleEndian: bits)))
-        offset += width
+    var vector = Array(repeating: Float.zero, count: data.count / width)
+    _ = vector.withUnsafeMutableBytes { destination in
+        data.copyBytes(to: destination)
     }
+    #if _endian(big)
+    for index in vector.indices {
+        vector[index] = Float(bitPattern: vector[index].bitPattern.byteSwapped)
+    }
+    #endif
     return vector
 }
 
@@ -1254,9 +1383,9 @@ func ftsPhrase(_ input: String) -> String {
     "\"" + input.replacingOccurrences(of: "\"", with: "\"\"") + "\""
 }
 
-/// OR query over planner-selected terms. Values are quoted as phrases so
+/// OR query over locally selected terms. Values are quoted as phrases so
 /// punctuation is data rather than FTS syntax; duplicates are removed without
-/// disturbing the planner's priority order.
+/// disturbing the analyzer's priority order.
 func ftsAnyQuery(_ inputs: [String]) -> String {
     var seen = Set<String>()
     var phrases: [String] = []

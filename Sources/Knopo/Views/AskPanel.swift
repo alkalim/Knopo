@@ -1,3 +1,4 @@
+import KnopoCore
 import SwiftUI
 
 /// A single-turn, retrieval-grounded question surface. There is deliberately
@@ -58,34 +59,54 @@ struct AskPanel: View {
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(answer.claims) { claim in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(attributed(claim))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                ForEach(Array(claim.citations.enumerated()), id: \.element.id) {
-                                    index, citation in
+                        if answer.presentation == .retrievedNotes {
+                            ForEach(answer.claims) { claim in
+                                if let citation = claim.citations.first {
                                     Button {
-                                        nav.openURL(
-                                            KnopoURL.block(citation.source.blockID),
-                                            inSidebar: wantsSidebarClick())
-                                        dismiss()
+                                        open(citation.source)
                                     } label: {
-                                        Text("[\(index + 1)] \(citation.source.pageDisplayName): “\(citation.quote)”")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.leading)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(citation.source.pageDisplayName)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            Text(claim.text)
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(3)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Go to supporting block")
+                                    .help("Go to note")
                                 }
                             }
-                            .environment(\.openURL, OpenURLAction { url in
-                                nav.openURL(url, inSidebar: wantsSidebarClick())
-                                dismiss()
-                                return .handled
-                            })
+                        } else {
+                            ForEach(answer.claims) { claim in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(attributed(claim))
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    ForEach(Array(claim.citations.enumerated()), id: \.element.id) {
+                                        index, citation in
+                                        Button {
+                                            open(citation.source)
+                                        } label: {
+                                            Text("[\(index + 1)] \(citation.source.pageDisplayName): “\(citation.quote)”")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Go to supporting block")
+                                    }
+                                }
+                                .environment(\.openURL, OpenURLAction { url in
+                                    nav.openURL(url, inSidebar: wantsSidebarClick())
+                                    dismiss()
+                                    return .handled
+                                })
+                            }
                         }
                     }
                 }
@@ -149,5 +170,10 @@ struct AskPanel: View {
             result += marker
         }
         return result
+    }
+
+    private func open(_ source: SearchHit) {
+        nav.openURL(KnopoURL.block(source.blockID), inSidebar: wantsSidebarClick())
+        dismiss()
     }
 }

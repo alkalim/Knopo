@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// One block whose derived embedding is missing or stale.
@@ -42,27 +43,26 @@ public struct SemanticHit: Equatable, Sendable {
 public enum SemanticRanker {
     public static func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Float? {
         guard !lhs.isEmpty, lhs.count == rhs.count else { return nil }
-        var dot = 0.0
-        var lhsNorm = 0.0
-        var rhsNorm = 0.0
-        for index in lhs.indices {
-            let a = Double(lhs[index])
-            let b = Double(rhs[index])
-            guard a.isFinite, b.isFinite else { return nil }
-            dot += a * b
-            lhsNorm += a * a
-            rhsNorm += b * b
-        }
-        guard lhsNorm > 0, rhsNorm > 0 else { return nil }
-        return Float(dot / (lhsNorm.squareRoot() * rhsNorm.squareRoot()))
+        let dot = vDSP.dot(lhs, rhs)
+        let lhsNorm = vDSP.sumOfSquares(lhs)
+        let rhsNorm = vDSP.sumOfSquares(rhs)
+        guard dot.isFinite, lhsNorm.isFinite, rhsNorm.isFinite,
+              lhsNorm > 0, rhsNorm > 0 else { return nil }
+        return dot / (lhsNorm.squareRoot() * rhsNorm.squareRoot())
     }
 
     public static func nearest<ID: Hashable>(
         to query: [Float], among candidates: [(id: ID, vector: [Float])], limit: Int
     ) -> [(id: ID, score: Float)] {
-        guard limit > 0 else { return [] }
+        guard limit > 0, !query.isEmpty else { return [] }
+        let queryNorm = vDSP.sumOfSquares(query)
+        guard queryNorm.isFinite, queryNorm > 0 else { return [] }
         return candidates.compactMap { candidate -> (id: ID, score: Float)? in
-            guard let score = cosineSimilarity(query, candidate.vector) else { return nil }
+            guard candidate.vector.count == query.count else { return nil }
+            let dot = vDSP.dot(query, candidate.vector)
+            let candidateNorm = vDSP.sumOfSquares(candidate.vector)
+            guard dot.isFinite, candidateNorm.isFinite, candidateNorm > 0 else { return nil }
+            let score = dot / (queryNorm.squareRoot() * candidateNorm.squareRoot())
             return (candidate.id, score)
         }
         .sorted {

@@ -4,61 +4,103 @@ import Testing
 @testable import KnopoCore
 
 @Suite struct OnDeviceAITests {
-    @Test func groundedAnswerRequiresValidSourceAndSupportingQuotation() {
+    @Test func groundedAnswerRequiresValidSourceAndSentenceNumbers() throws {
         let source = SearchHit(
             blockID: UUID(), pageKey: "design", pageDisplayName: "Design",
-            content: "The index is rebuildable.")
+            content: "The index is rebuildable. The cache is derived.")
+        let prompt = try #require(AskPromptBuilder.prepare(
+            question: "How is the index stored?", sources: [source]))
         let generated = [
-            QuotedClaim(
+            SentenceReferencedClaim(
                 text: "The index is rebuildable.",
-                citations: [QuotedCitation(sourceNumber: 1, quote: "index is rebuildable")]),
-            QuotedClaim(text: "No citation.", citations: []),
-            QuotedClaim(
+                citations: [SentenceReference(sourceNumber: 1, sentenceNumber: 1)]),
+            SentenceReferencedClaim(text: "No citation.", citations: []),
+            SentenceReferencedClaim(
                 text: "Invented source.",
-                citations: [QuotedCitation(sourceNumber: 9, quote: "index is rebuildable")]),
-            QuotedClaim(
+                citations: [SentenceReference(sourceNumber: 9, sentenceNumber: 1)]),
+            SentenceReferencedClaim(
                 text: "Invented evidence.",
-                citations: [QuotedCitation(sourceNumber: 1, quote: "SQLite is mandatory")]),
+                citations: [SentenceReference(sourceNumber: 1, sentenceNumber: 9)]),
         ]
 
-        let answer = GroundedAnswer.validate(generated, sources: [source])
+        let answer = GroundedAnswer.validate(generated, prompt: prompt)
         #expect(answer.claims.count == 1)
         #expect(answer.claims.first?.text == "The index is rebuildable.")
         #expect(answer.claims.first?.citations.map(\.source.blockID) == [source.blockID])
+        #expect(answer.claims.first?.citations.first?.quote == "The index is rebuildable.")
     }
 
-    @Test func groundedAnswerNormalizesQuoteCaseAndWhitespaceAndDeduplicates() {
+    @Test func groundedAnswerDeduplicatesRepeatedSentenceReferences() throws {
         let source = SearchHit(
             blockID: UUID(), pageKey: "notes", pageDisplayName: "Notes",
             content: "A supporting\n  fact lives here.")
+        let prompt = try #require(AskPromptBuilder.prepare(
+            question: "Where is the fact?", sources: [source]))
         let answer = GroundedAnswer.validate(
-            [QuotedClaim(text: "A fact.", citations: [
-                QuotedCitation(sourceNumber: 1, quote: "SUPPORTING FACT"),
-                QuotedCitation(sourceNumber: 1, quote: "supporting   fact"),
-            ])], sources: [source])
+            [SentenceReferencedClaim(text: "A fact.", citations: [
+                SentenceReference(sourceNumber: 1, sentenceNumber: 1),
+                SentenceReference(sourceNumber: 1, sentenceNumber: 1),
+            ])], prompt: prompt)
 
         #expect(answer.claims.count == 1)
         #expect(answer.claims.first?.citations.count == 1)
     }
 
-    @Test func searchPlanKeepsOnlyFocusedPlannerOutput() throws {
-        let plan = try #require(AskSearchPlan(
-            topic: "  anomaly detection  ",
-            intent: "discover noteworthy material",
-            semanticQueries: ["anomaly detection", "outlier detection", "ANOMALY DETECTION"],
-            lexicalPhrases: ["anomaly detection"],
-            lexicalTerms: ["anomaly", "detection", "outlier", "anomaly"]))
-
+    @Test func queryAnalysisRemovesConversationalAndSubjectiveFraming() throws {
+        let plan = try #require(AskQueryAnalyzer.analyze(
+            "Show me cool notes about anomaly detection"))
         #expect(plan.topic == "anomaly detection")
-        #expect(plan.semanticQueries == ["anomaly detection", "outlier detection"])
-        #expect(plan.lexicalTerms == ["anomaly", "detection", "outlier"])
-        #expect(!plan.semanticQueries.contains("Show me cool notes about anomaly detection"))
+        #expect(plan.semanticQuery == "anomaly detection")
+        #expect(plan.lexicalTerms == ["anomaly", "detection"])
+        #expect(plan.responseMode == .retrievedNotes)
     }
 
-    @Test func searchPlanRejectsMissingRetrievalChannels() {
-        #expect(AskSearchPlan(
-            topic: "index format", intent: "decision",
-            semanticQueries: [], lexicalPhrases: [], lexicalTerms: []) == nil)
+    @Test func queryAnalysisKeepsDecisionIntentWithoutQuestionWords() throws {
+        let aboutPlan = try #require(AskQueryAnalyzer.analyze(
+            "What did I decide about the index format?"))
+        #expect(aboutPlan.topic == "index format")
+        #expect(aboutPlan.semanticQuery == "decision about index format")
+        #expect(aboutPlan.lexicalTerms == ["index", "format"])
+        #expect(aboutPlan.responseMode == .generatedAnswer)
+
+        let reorderedPlan = try #require(AskQueryAnalyzer.analyze(
+            "Which index format did I choose?"))
+        #expect(reorderedPlan.topic == "index format")
+        #expect(reorderedPlan.semanticQuery == "decision about index format")
+    }
+
+    @Test func queryAnalysisPreservesMeaningfulNegation() throws {
+        let plan = try #require(AskQueryAnalyzer.analyze(
+            "Why did we not choose SQLite?"))
+        #expect(plan.topic == "not choose SQLite")
+        #expect(plan.semanticQuery == "reasons for not choose SQLite")
+        #expect(plan.lexicalTerms == ["choose", "SQLite"])
+    }
+
+    @Test func queryAnalysisDoesNotDiscardSubjectWordsThatAreAlsoAppVocabulary() throws {
+        let plan = try #require(AskQueryAnalyzer.analyze("Find page cache behavior"))
+        #expect(plan.topic == "page cache behavior")
+        #expect(plan.lexicalTerms == ["page", "cache", "behavior"])
+    }
+
+    @Test func queryAnalysisDoesNotMistakeSubjectWordsForSearchCommands() throws {
+        let crops = try #require(AskQueryAnalyzer.analyze("cover crops"))
+        #expect(crops.topic == "cover crops")
+        let references = try #require(AskQueryAnalyzer.analyze("reference counting"))
+        #expect(references.topic == "reference counting")
+        let impact = try #require(AskQueryAnalyzer.analyze("Show impact on latency"))
+        #expect(impact.topic == "impact on latency")
+    }
+
+    @Test func queryAnalysisRecognizesExplicitNotesSearchFrames() throws {
+        let plan = try #require(AskQueryAnalyzer.analyze(
+            "Find notes on anomaly detection"))
+        #expect(plan.topic == "anomaly detection")
+        #expect(plan.responseMode == .retrievedNotes)
+    }
+
+    @Test func queryAnalysisRejectsQuestionsWithoutASearchableTopic() {
+        #expect(AskQueryAnalyzer.analyze("show me notes") == nil)
     }
 
     @Test func evidenceSelectionPrefersDifferentPagesAndRemovesDuplicateText() {
@@ -74,6 +116,29 @@ import Testing
 
         let selected = AskEvidenceSelector.select(ranked, limit: 4)
         #expect(selected.map(\.content) == ["first", "second", "fourth", "fifth"])
+    }
+
+    @Test func retrievedNotesAnswerReturnsSourcesWithoutGeneratedClaims() {
+        let sources = [
+            SearchHit(
+                blockID: UUID(), pageKey: "research", pageDisplayName: "Research",
+                content: "Outlier detection example"),
+        ]
+        let answer = GroundedAnswer.retrievedNotes(sources)
+        #expect(answer.presentation == .retrievedNotes)
+        #expect(answer.claims.map(\.text) == ["Outlier detection example"])
+        #expect(answer.claims.first?.citations.first?.source.blockID == sources[0].blockID)
+    }
+
+    @Test func answerPromptNumbersSentencesAndKeepsTheirLocalMapping() throws {
+        let source = SearchHit(
+            blockID: UUID(), pageKey: "research", pageDisplayName: "Research",
+            content: "First observation. Second observation.")
+        let prepared = try #require(AskPromptBuilder.prepare(
+            question: "What happened?", sources: [source]))
+        #expect(prepared.text.contains("S1: First observation."))
+        #expect(prepared.text.contains("S2: Second observation."))
+        #expect(prepared.sentences == [["First observation.", "Second observation."]])
     }
 
     @Test func answerPromptHasAHardTotalBudgetForLargeGraphBlocks() throws {
