@@ -26,7 +26,9 @@ struct OutlineEditorView: View {
             findActive: nav.findActive, findQuery: nav.findQuery,
             findStepToken: nav.findStepToken, findForward: nav.findStepForward,
             // Reacts to a result-click's scroll-to/flash request.
-            highlightToken: nav.highlightToken
+            highlightToken: nav.highlightToken,
+            // …and to a `⌘J` writing-focus request.
+            focusWritingToken: nav.focusWritingToken
         )
     }
 }
@@ -45,6 +47,10 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
     let findStepToken: Int
     let findForward: Bool
     let highlightToken: Int
+    /// `Navigator.focusWritingToken`. Held only so that a `⌘J` request makes this
+    /// view differ from its last value and SwiftUI runs `updateNSView` — the
+    /// request itself is read off `nav` in `present`, which never runs otherwise.
+    let focusWritingToken: Int
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -466,9 +472,10 @@ final class OutlineEditorController: NSObject {
                 }
             }
         }
-        // `⌘J` pressed on the journal feed: the caret goes to today, wherever it
-        // happens to be now, without the view navigating anywhere.
-        if nav.focusWritingIn == pageName {
+        // `⌘J`: the caret goes to today, wherever it happens to be now — taking it
+        // from another day in the feed if that's where it was. Panes sit this out,
+        // so the request lands in the document area and not in a reference card.
+        if !inPane, nav.focusWritingIn == pageName {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.pageName == pageName,
                       self.nav.focusWritingIn == pageName else { return }

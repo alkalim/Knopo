@@ -21,8 +21,17 @@ final class Navigator: ObservableObject {
     @Published var focusFirstBlock: String?
     /// Page whose writing block should take the caret now, at the user's explicit
     /// request (`⌘J`) — so it may take focus from another day in the feed, which
-    /// the automatic version deliberately never does.
+    /// the automatic version deliberately never does. Set it through
+    /// `requestWritingFocus(in:)`, never on its own: the request only reaches an
+    /// outline together with `focusWritingToken`.
     @Published var focusWritingIn: String?
+    /// Bumped by every writing-focus request, and read by the outline's SwiftUI
+    /// view — which is what makes that view differ from its previous value. The
+    /// page name alone lives here on the Navigator, so without the token every
+    /// stored property of the editor's view is unchanged, SwiftUI skips
+    /// `updateNSView`, and the request is never delivered (a release build then
+    /// does nothing at all on `⌘J`; a debug build happens to update anyway).
+    @Published private(set) var focusWritingToken = 0
 
     /// The block an outline should scroll to and flash after it loads (set by
     /// clicking a query / backlink / tag result). The token bumps on each
@@ -82,21 +91,24 @@ final class Navigator: ObservableObject {
         }
     }
 
-    /// `⌘J`: the journal. From anywhere else this opens the journal home (today
-    /// plus previous days). Pressing it again, with the feed already showing, opens
-    /// **today's own page** — the feed is for reading back, and a second press means
-    /// "take me to today to write", where the caret lands ready to type (§5.4, §10).
-    /// `⌘J` means "take me to the journal", every time. It used to open today's
-    /// own page when the feed was already showing, which made repeated presses
-    /// cycle between two views. Pressing it on the feed now puts the caret in
-    /// today instead — still "take me to today to write", without navigating
-    /// somewhere else to do it.
+    /// `⌘J`: take me to today, every time. From anywhere else this opens the
+    /// journal home (today plus previous days); with the feed already showing it
+    /// stays put, so repeated presses never cycle between two views. Either way it
+    /// asks for the caret in today's writing block (§5.4, §10) — explicitly, so
+    /// unlike the automatic "a journal day opens ready to write" it fires however
+    /// often it's asked for and may take the caret from another day in the feed.
     func goToJournal() {
-        if current == .journalHome {
-            focusWritingIn = JournalDate.today().pageName
-        } else {
-            navigate(to: .journalHome)
-        }
+        // Navigate first: the request is consumed by whichever outline presents
+        // today next, and pressed on today's *own* page that would otherwise be
+        // the outline being torn down rather than the feed's.
+        navigate(to: .journalHome)   // a no-op when the feed is already showing
+        requestWritingFocus(in: JournalDate.today().pageName)
+    }
+
+    /// Asks the outline showing `pageName` to put the caret in its writing block.
+    func requestWritingFocus(in pageName: String) {
+        focusWritingIn = pageName
+        focusWritingToken += 1
     }
 
     /// Navigate to a just-created page and focus its (empty) first block so the

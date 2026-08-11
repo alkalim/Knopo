@@ -305,12 +305,13 @@ shown, followed by previous non-empty days in reverse chronological order. A
 journal is an ordinary page in every other respect: it can contain blocks, be
 referenced, be favourited, and show backlinks.
 
-Use `⌘J` to return to the journal; press it again and the caret goes to today's
-last block, ready to type. It never navigates away from the journal, so repeating
-it doesn't bounce you between views — click a day's heading to open that day on its
-own page. Either way the caret lands in an empty block at the end of today, so you
-can type at once — even if a block in the right sidebar was being edited, which
-hands its editing back and commits what you had typed there. Right-click **Journal** in the sidebar and
+Use `⌘J` to go to today: the journal opens and the caret lands in an empty block
+at the end of today, ready to type. Every press does both, from another page or
+from another day in the feed, so it doesn't matter where you were — and it never
+navigates away from the journal, so repeating it doesn't bounce you between views.
+Click a day's heading to open that day on its own page. A block being edited
+elsewhere — including one in the right sidebar — hands its editing back and commits
+what you had typed there. Right-click **Journal** in the sidebar and
 choose **Jump to Day…** to navigate to another date. Slash commands such as
 `/today`, `/tomorrow`, `/yesterday`, and `/date` insert date references.
 

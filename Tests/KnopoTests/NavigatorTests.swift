@@ -5,12 +5,13 @@ import KnopoCore
 
 @Suite struct NavigatorTests {
 
-    /// `⌘J` is "take me to the journal" — every press, not a toggle. It used to
-    /// open today's own page when the feed was already showing, so holding it down
-    /// cycled between two views. Pressed on the feed it now asks for the caret in
-    /// today and leaves the view where it is.
+    /// `⌘J` is "take me to today" — every press, not a toggle. It lands on the feed
+    /// and asks for the caret in today from wherever you were, and each press is a
+    /// fresh request: the token has to bump, or an outline whose SwiftUI view is
+    /// otherwise unchanged is never asked to present again and the press does
+    /// nothing at all.
     @MainActor
-    @Test func journalShortcutAlwaysLandsOnTheFeed() throws {
+    @Test func journalShortcutAlwaysAsksForTodaysWritingBlock() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-nav-journal-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -19,28 +20,34 @@ import KnopoCore
         let nav = Navigator(app: app)
         let today = JournalDate.today().pageName
 
-        // Somewhere else → the feed.
+        // Somewhere else → the feed, caret asked for in today.
         nav.navigate(to: .allPages)
         nav.goToJournal()
         #expect(nav.current == .journalHome)
-        #expect(nav.focusWritingIn == nil)   // it opens ready to write on its own
-
-        // Already on the feed → stay, and ask for the caret in today.
-        nav.goToJournal()
-        #expect(nav.current == .journalHome)
         #expect(nav.focusWritingIn == today)
+        let firstToken = nav.focusWritingToken
 
-        // Pressing it repeatedly never navigates away.
+        // Already on the feed → stay, and ask again with a new token (the caret may
+        // be in another day, as it is when this is pressed from the feed at all).
         nav.focusWritingIn = nil             // as the outline does on consuming it
         nav.goToJournal()
+        #expect(nav.current == .journalHome)
+        #expect(nav.focusWritingIn == today)
+        #expect(nav.focusWritingToken > firstToken)
+
+        // Pressing it repeatedly never navigates away, and every press is a request.
+        let beforeRepeats = nav.focusWritingToken
+        nav.goToJournal()
         nav.goToJournal()
         #expect(nav.current == .journalHome)
         #expect(nav.focusWritingIn == today)
+        #expect(nav.focusWritingToken == beforeRepeats + 2)
 
         // From today's own page it still takes you to the journal.
         nav.navigate(to: .page(name: today))
         nav.goToJournal()
         #expect(nav.current == .journalHome)
+        #expect(nav.focusWritingIn == today)
     }
     @MainActor
     @Test func allPagesCollapseStatePersistsPerGraph() throws {
