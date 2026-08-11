@@ -92,19 +92,37 @@ final class GraphManager: ObservableObject {
         welcome.blocks = PageParser.parse("""
         - **Knopo** is a local-first outliner: everything is a block, pages are trees of blocks.
         - Your notes live as plain Markdown files in `pages/` and `journals/` — nothing is held hostage.
-        - Try the basics:
-          - Type `[[` to link to a page — like [[Ideas]] (links to pages that don't exist yet create *stubs*).
+        - The journal is your home: one page per day, today on top. `⌘J` gets you there from anywhere.
+        - Try the basics: #getting-started
+          - Make a page: press `⌘K`, type its name, and choose “Create page …” — or use New Page in All Pages.
+          - Type `[[` to link to a page — like [[Ideas]] (links to pages that don't exist yet create *stubs*, which become real pages as soon as you write in them).
           - Type `((` to search blocks and insert a durable `((block-id))` reference.
           - Use embeds to show read-only content in place: `{{embed [[Page]]}}` embeds a page, `{{embed ((block-id))}}` embeds a block subtree.
-          - Type `/` at a word start for slash commands like `/today`, `/link`, `/code-block`, `/page-embed`, and `/block-embed`.
-          - Type `#` to add a tag, like #getting-started.
-          - `Enter` makes a new block, `Tab` indents, `Shift+Tab` outdents.
-          - Click a bullet to zoom into a block; click the triangle to fold.
-        - The journal is your home: one page per day, today on top.
-        - Press `⌘K` to search everything.
+          - Type `/` at a word start for slash commands like `/today`, `/link`, `/code-block`, `/query`, `/image`, `/page-embed`, and `/block-embed`.
+          - Type `#` to add a tag, like #getting-started. Tags are labels, not pages: click one to see every block that carries it.
+          - `Enter` makes a new block, `Tab` indents, `Shift+Tab` outdents, `⌥↑` / `⌥↓` move it.
+          - Click a bullet to zoom into a block, the triangle to fold, or drag a bullet to move the block and its children anywhere.
+        - Keep tasks where you wrote them: `⌘Enter` cycles a block from plain to `TODO` to `DONE`, and clicking the checkbox ticks it off — in query results and embeds too, where it updates the source block. #tips
+          - TODO Click the checkbox here, or press `⌘Enter`, to tick this off
+        - Queries collect matching blocks from the whole graph and stay live — `/query` writes one for you: #tips
+          - {{query TODO}}
+        - Tables are plain pipe Markdown, rendered as a grid: #tips
+          - | Shortcut | What it does |
+            |---|---|
+            | `⌘K` | Search everything |
+            | `⌘F` | Find inside the page |
+            | `⌘Enter` | Cycle TODO / DONE |
+        - A few more things to try: #tips
+          - Drag an image in from Finder, paste a screenshot, or use `/image` — then drag its right edge to resize it.
+          - `⇧`-click or `⌘`-click a link to open it in the right sidebar instead of navigating.
+          - Right-click a bullet for the block menu: a background color, or a copyable block reference.
+          - Right-click a page in the sidebar to favourite it — this page already is.
         """).blocks
         store.updatePage(welcome)
         try? store.savePage(named: "Welcome to Knopo")
+        // Seed the sidebar's Favourites section with the one page there is
+        // (§11.1), so a new graph opens with somewhere to go back to.
+        try? store.updateConfig { $0.toggleFavourite("Welcome to Knopo") }
     }
 }
 
