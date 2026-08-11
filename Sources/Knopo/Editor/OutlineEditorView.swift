@@ -849,23 +849,32 @@ final class OutlineEditorController: NSObject {
         renderEmbed(target, embedDepth: 0, visited: [])
     }
 
-    /// A 6px filled circle inline bullet (matching `BulletView`'s dot), as a
-    /// text attachment so it renders at a fixed size regardless of font and sits
-    /// vertically centered on the line. Followed by a small gap.
-    private static let embedBulletImage: NSImage = {
-        let image = NSImage(size: NSSize(width: 6, height: 6))
-        image.lockFocus()
-        NSColor.secondaryLabelColor.withAlphaComponent(0.6).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 6, height: 6)).fill()
-        image.unlockFocus()
+    /// A filled circle inline bullet, as a text attachment so it sits vertically
+    /// centered on the line. Same diameter and color as `BulletView`'s dot, so
+    /// embedded/query rows read as structure like the outline's own bullets.
+    /// The drawing handler runs at draw time, so the dynamic color follows the
+    /// appearance; the cache is keyed by diameter, which changes with zoom.
+    private static var embedBulletCache: (diameter: CGFloat, image: NSImage)?
+
+    private static func embedBulletImage(diameter: CGFloat) -> NSImage {
+        if let cached = embedBulletCache, cached.diameter == diameter { return cached.image }
+        let image = NSImage(size: NSSize(width: diameter, height: diameter), flipped: false) { rect in
+            NSColor.tertiaryLabelColor.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        image.cacheMode = .never
+        embedBulletCache = (diameter, image)
         return image
-    }()
+    }
 
     private static func embedBullet() -> NSAttributedString {
+        let d = BulletView.dotDiameter()
         let attachment = NSTextAttachment()
-        attachment.image = embedBulletImage
-        // Center the 6px dot against the x-height of the 14pt body line.
-        attachment.bounds = CGRect(x: 0, y: 2, width: 6, height: 6)
+        attachment.image = embedBulletImage(diameter: d)
+        // Center the dot against the x-height of the body line.
+        let y = ((BlockRenderer.baseFont().xHeight - d) / 2).rounded()
+        attachment.bounds = CGRect(x: 0, y: y, width: d, height: d)
         let bullet = NSMutableAttributedString(attachment: attachment)
         bullet.append(NSAttributedString(string: "  ", attributes: [.font: BlockRenderer.baseFont()]))
         return bullet
