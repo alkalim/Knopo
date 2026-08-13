@@ -1,6 +1,7 @@
 import SwiftUI
 import KnopoCore
 
+
 /// Per-window/per-tab navigation state over the shared `AppState` graph model.
 /// Each tab has its own current page, history, right-sidebar panes, and search
 /// sheet, so tabs are independent views of one graph (SPEC §12).
@@ -146,11 +147,19 @@ final class Navigator: ObservableObject {
         // content alone is ambiguous (duplicates, empty blocks).
         let position = (try? app.store.cache.position(ofBlock: blockID)) ?? nil
         highlightTarget = BlockHighlight(
-            pageKey: PageName.key(pageName), blockID: blockID, content: content, position: position)
+            pageKey: PageName.key(pageName), blockID: blockID, content: content,
+            position: position, inSidebar: inSidebar)
         highlightToken += 1
         let target = NavTarget.page(name: pageName)
         inSidebar ? openInRightSidebar(target) : navigate(to: target)
     }
+
+    /// Spends the pending scroll-to/flash request — called by the outline that
+    /// applies it. A request left standing is honoured again by the *next* outline
+    /// created for that page (a fresh one starts having handled no token at all),
+    /// so a later page-title click, sidebar pick, or ⌘K would jump to a block the
+    /// user last clicked minutes ago.
+    func consumeHighlight() { highlightTarget = nil }
 
     func closeRightPane(at index: Int) {
         guard rightPanes.indices.contains(index) else { return }

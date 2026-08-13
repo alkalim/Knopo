@@ -74,6 +74,130 @@ import KnopoCore
         )
     }
 
+    /// A scroll-to/flash request belongs to the click that made it. It used to stay
+    /// pending, and every outline created afterwards for that page starts having
+    /// handled no token — so simply navigating there again (a page-title click in
+    /// the same results, the sidebar, ⌘K) jumped to the block clicked before.
+    @MainActor
+    @Test func aResultClickRequestIsSpentByTheOutlineThatAppliesIt() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-nav-highlight-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = try GraphStore(root: root)
+        var page = try store.createPage(named: "Target")
+        page.blocks[0].content = "the clicked hit"
+        store.updatePage(page)
+        try store.savePage(named: page.name)
+
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+
+        nav.navigateToBlock(pageName: "Target", blockID: page.blocks[0].id,
+                            content: "the clicked hit", inSidebar: false)
+        #expect(nav.highlightTarget?.blockID == page.blocks[0].id)
+        #expect(nav.highlightTarget?.inSidebar == false)
+
+        // The outline that applied it clears it; navigating back to the page must
+        // not find a request waiting.
+        nav.consumeHighlight()
+        nav.navigate(to: .allPages)
+        nav.navigate(to: .page(name: "Target"))
+        #expect(nav.highlightTarget == nil)
+    }
+
+    /// The clicked id comes from the index, which parsed the page separately, so
+    /// only `id::`-pinned blocks match by id; the rest rely on the recorded preorder
+    /// position. A position read against an index that has moved on points at an
+    /// unrelated block — the flash (and the scroll with it) landed somewhere random.
+    @MainActor
+    @Test func theHighlightMatcherOnlyAcceptsABlockThatStillCarriesTheContent() {
+        typealias Candidate = OutlineEditorController.HighlightCandidate
+        let rows = [
+            Candidate(id: UUID(), path: [0], content: "first"),
+            Candidate(id: UUID(), path: [1], content: "second"),
+            Candidate(id: UUID(), path: [2], content: "third"),
+            Candidate(id: UUID(), path: [3], content: "second"),
+            Candidate(id: UUID(), path: [4], content: "fifth"),
+        ]
+        let paths: (Int) -> [Int]? = { $0 < rows.count ? [$0] : nil }
+        func target(_ id: UUID, _ content: String, position: Int?) -> BlockHighlight {
+            BlockHighlight(pageKey: "target", blockID: id, content: content,
+                           position: position, inSidebar: false)
+        }
+
+        // An id that still exists wins outright, whatever the position says.
+        #expect(OutlineEditorController.highlightRow(
+            target(rows[2].id, "third", position: 0), in: rows, pathAtPosition: paths) == 2)
+
+        // A drifted id with a position whose block still reads the same: trusted.
+        #expect(OutlineEditorController.highlightRow(
+            target(UUID(), "third", position: 2), in: rows, pathAtPosition: paths) == 2)
+
+        // A stale position — the block there says something else now — is refused,
+        // and the content search picks the occurrence nearest to it.
+        #expect(OutlineEditorController.highlightRow(
+            target(UUID(), "second", position: 4), in: rows, pathAtPosition: paths) == 3)
+        #expect(OutlineEditorController.highlightRow(
+            target(UUID(), "second", position: 0), in: rows, pathAtPosition: paths) == 1)
+
+        // Nothing on the page carries that content any more: flash nothing rather
+        // than a block the user never clicked.
+        #expect(OutlineEditorController.highlightRow(
+            target(UUID(), "gone", position: 1), in: rows, pathAtPosition: paths) == nil)
+
+        // An empty clicked block is only ever found by id or position — searching
+        // for no content would match the first blank row on the page.
+        let blanks = [Candidate(id: UUID(), path: [0], content: "first"),
+                      Candidate(id: UUID(), path: [1], content: "")]
+        #expect(OutlineEditorController.highlightRow(
+            target(UUID(), "", position: nil), in: blanks, pathAtPosition: paths) == nil)
+        #expect(OutlineEditorController.highlightRow(
+            target(UUID(), "", position: 1), in: blanks, pathAtPosition: paths) == 1)
+    }
+
+    /// A result click's scroll is aimed at row geometry that is still provisional:
+    /// heights are measured against the table's width, and every height is asked for
+    /// before SwiftUI puts the table in the hierarchy — 100 pt bounds, no clip view,
+    /// no window — so the rows stand several times too tall. The reveal therefore
+    /// keeps aiming until the row it wants is in sight and has stopped moving.
+    @MainActor
+    @Test func aRevealKeepsAimingUntilTheRowIsInSightAndStill() {
+        let visible = NSRect(x: 0, y: 100, width: 700, height: 900)
+        let toolbar: CGFloat = 52
+
+        // Never scrolled yet: nothing is settled.
+        #expect(!OutlineEditorController.revealHasSettled(
+            rowRect: NSRect(x: 0, y: 300, width: 700, height: 27),
+            visibleRect: visible, topOverlap: toolbar, scrolledTo: nil))
+
+        // Scrolled to, still there, well inside: done.
+        #expect(OutlineEditorController.revealHasSettled(
+            rowRect: NSRect(x: 0, y: 300, width: 700, height: 27),
+            visibleRect: visible, topOverlap: toolbar, scrolledTo: 300))
+
+        // Re-measured out from under the scroll: aim again.
+        #expect(!OutlineEditorController.revealHasSettled(
+            rowRect: NSRect(x: 0, y: 1500, width: 700, height: 27),
+            visibleRect: visible, topOverlap: toolbar, scrolledTo: 300))
+
+        // In the visible rect but inside the band the toolbar covers — a sliver the
+        // reader cannot see, which is where `scrollRowToVisible` used to stop.
+        #expect(!OutlineEditorController.revealHasSettled(
+            rowRect: NSRect(x: 0, y: 120, width: 700, height: 27),
+            visibleRect: visible, topOverlap: toolbar, scrolledTo: 120))
+
+        // A row taller than the viewport is shown once it covers it.
+        #expect(OutlineEditorController.revealHasSettled(
+            rowRect: NSRect(x: 0, y: 90, width: 700, height: 2_000),
+            visibleRect: visible, topOverlap: toolbar, scrolledTo: 90))
+
+        // The seen area is the visible rect less the toolbar band.
+        #expect(OutlineEditorController.shownRect(visibleRect: visible, topOverlap: toolbar)
+            == NSRect(x: 0, y: 152, width: 700, height: 848))
+    }
+
     /// A query/backlink result row links as `knopo://page/<name>?block=<id>`, and
     /// a namespaced name percent-encodes its `/`. Decoding that name back with
     /// `lastPathComponent` kept only the trailing part, so clicking the row opened

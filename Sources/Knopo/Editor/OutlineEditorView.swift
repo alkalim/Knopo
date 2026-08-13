@@ -3,6 +3,8 @@ import AppKit
 import KnopoCore
 import UniformTypeIdentifiers
 
+
+
 /// The outline editor (SPEC §5.4, §15): an AppKit NSTableView whose rows are
 /// the visible blocks. The focused block edits raw Markdown in one shared
 /// NSTextView; unfocused blocks render via BlockRenderer.
@@ -97,6 +99,9 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
 final class OutlineTableView: NSTableView {
 
     var onWidthChange: (() -> Void)?
+    /// Every layout pass, so a pending reveal can notice that the rows moved under
+    /// it — including AppKit's own re-measures, which no delegate call announces.
+    var onDidLayout: (() -> Void)?
     var onLiveResizeEnd: (() -> Void)?
     /// Returns true if the controller consumed the key (node-selection mode).
     var onKeyDown: ((NSEvent) -> Bool)?
@@ -184,6 +189,7 @@ final class OutlineTableView: NSTableView {
             lastLayoutWidth = bounds.width
             onWidthChange?()
         }
+        onDidLayout?()
     }
 
     override func viewDidEndLiveResize() {
@@ -232,6 +238,65 @@ final class OutlineEditorController: NSObject {
     /// Last `nav.highlightToken` this outline acted on, so a scroll-to/flash
     /// request fires exactly once per click.
     private var lastHighlightToken = 0
+    /// A block to scroll to and flash. It outlives its first attempt on purpose.
+    ///
+    /// Row heights are measured against the table's width, and the table is asked
+    /// for every height before SwiftUI puts it in the hierarchy — bounds 100 pt
+    /// wide, no clip view, no window, nothing to read a real width from. Measured
+    /// that narrow every row wraps many times over, so the rows stand several times
+    /// too tall and the first offset can be far from the block: this is what sent a
+    /// result click somewhere random. The heights are then re-measured, more than
+    /// once, as the layout settles — and AppKit's own passes announce none of it
+    /// through the delegate. So the reveal is re-applied from the table's layout
+    /// pass until the row stops moving under it, and abandoned after a short window,
+    /// past which the layout is the user's again.
+    private struct Reveal {
+        let blockID: UUID
+        /// Where the row sat when it was last scrolled to; nil before the first.
+        var rowMinY: CGFloat?
+        /// After this the layout is the user's again — an edit or a window resize
+        /// must not drag the view back to a block clicked seconds ago.
+        let until: TimeInterval
+    }
+
+    /// The part of a scrolling outline the reader can actually see: the visible rect
+    /// less the band the window toolbar covers. The scroll view runs under the
+    /// toolbar (`contentInsets.top` is 52 pt here), and that band counts as visible
+    /// to AppKit — which is why `scrollRowToVisible` was content to leave a clicked
+    /// row as a sliver tucked beneath it.
+    static func shownRect(visibleRect: NSRect, topOverlap: CGFloat) -> NSRect {
+        var shown = visibleRect
+        shown.origin.y += topOverlap
+        shown.size.height -= topOverlap
+        return shown
+    }
+
+    /// Whether a reveal has nothing left to do: the row it aimed at is in sight and
+    /// the re-measures have stopped moving it. Aiming again while either is untrue is
+    /// the point of keeping the request — the row being *seen* is the goal, not the
+    /// scroll having been issued. A row taller than the viewport counts as shown once
+    /// it covers it.
+    static func revealHasSettled(
+        rowRect: NSRect, visibleRect: NSRect, topOverlap: CGFloat, scrolledTo: CGFloat?
+    ) -> Bool {
+        guard let scrolledTo, abs(scrolledTo - rowRect.minY) <= 1 else { return false }
+        let shown = shownRect(visibleRect: visibleRect, topOverlap: topOverlap)
+        if shown.contains(rowRect) { return true }
+        return rowRect.height >= shown.height && rowRect.intersects(shown)
+    }
+    private var revealRequest: Reveal?
+    /// Coalesces the deferred reveal: the reload, layout and height passes all ask.
+    private var revealScheduled = false
+    /// Reloads the table, then lets a pending reveal aim at the new geometry.
+    private func reloadAllRows() {
+        tableView.reloadData()
+        revealIfPossible()
+    }
+    /// The cell showing the current flash and the block it was lit for, so the
+    /// flash can be taken off when that cell is reused for another row, or when a
+    /// later reveal lights a different one.
+    private weak var flashedCell: OutlineRowCell?
+    private var flashedBlockID: UUID?
     /// Whether this outline is a right-sidebar pane. Panes are for reference: they
     /// never take focus on presentation, and a main outline may take focus from one
     /// (§5.4). Applied to the editor by `applyPaneRole`.
@@ -326,6 +391,7 @@ final class OutlineEditorController: NSObject {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.onWidthChange = { [weak self] in self?.widthDidChange() }
+        tableView.onDidLayout = { [weak self] in self?.revealIfPossible() }
         tableView.onLiveResizeEnd = { [weak self] in self?.liveResizeDidEnd() }
         tableView.onKeyDown = { [weak self] in self?.handleSelectionKeyDown($0) ?? false }
         tableView.onDragExited = { [weak self] in self?.cancelSpringLoad() }
@@ -441,6 +507,7 @@ final class OutlineEditorController: NSObject {
         renderedWithDensity = BlockRenderer.density
         renderedWithWeight = BlockRenderer.contentWeight
         if pageName != self.pageName || zoom != self.zoom {
+            revealRequest = nil
             self.pageName = pageName
             self.zoom = zoom
             focusedBlockID = nil
@@ -449,7 +516,7 @@ final class OutlineEditorController: NSObject {
             autocomplete.dismiss()
             editor.removeFromSuperview()
             rebuildRows()
-            tableView.reloadData()
+            reloadAllRows()
             tableView.invalidateIntrinsicContentSize()
         } else if bracketsChanged || fontZoomChanged || densityChanged || weightChanged {
             // A global rendering preference flipped (brackets, content zoom, or
@@ -658,38 +725,121 @@ final class OutlineEditorController: NSObject {
         "\(pageName)#\(zoom?.uuidString ?? "")"
     }
 
-    /// Scrolls to and flashes a block when a result click requested it (and the
-    /// request is for the page this outline shows). Matches by id, then by
-    /// content — block ids drift across re-parses unless `id::`-pinned.
+    /// One row as the highlight matcher sees it — enough to recognise the clicked
+    /// block without a table.
+    struct HighlightCandidate: Equatable {
+        let id: UUID
+        let path: [Int]
+        let content: String
+    }
+
+    /// Which row a result click should scroll to and flash, or nil for none.
+    ///
+    /// The clicked id comes from the *index*, which parsed the page separately from
+    /// the copy on screen, and only `id::`-pinned blocks keep an id across parses —
+    /// so most clicks fall through to the preorder position recorded with the
+    /// request. That position is trusted only while the block sitting there still
+    /// carries the clicked content: read against an index that has moved on since,
+    /// it names an unrelated block, which is how a click landed somewhere random.
+    /// A content search is the last resort, nearest the recorded position because a
+    /// page can repeat itself. Nothing matching flashes nothing — the page stays
+    /// where it opened rather than jumping somewhere that wasn't clicked.
+    static func highlightRow(
+        _ target: BlockHighlight, in candidates: [HighlightCandidate],
+        pathAtPosition: (Int) -> [Int]?
+    ) -> Int? {
+        if let byID = candidates.firstIndex(where: { $0.id == target.blockID }) { return byID }
+        let byPosition = target.position.flatMap(pathAtPosition)
+            .flatMap { path in candidates.firstIndex { $0.path == path } }
+        if let byPosition, candidates[byPosition].content == target.content { return byPosition }
+        // An empty clicked block can only be found by id or position: searching for
+        // no content would match the first blank row on the page.
+        guard !target.content.isEmpty else { return nil }
+        let matches = candidates.indices.filter { candidates[$0].content == target.content }
+        guard let first = matches.first else { return nil }
+        guard let byPosition else { return first }
+        return matches.min { abs($0 - byPosition) < abs($1 - byPosition) } ?? first
+    }
+
+    /// Scrolls to and flashes a block when a result click requested it — for the
+    /// page this outline shows, on the surface the click asked for.
     private func applyPendingHighlightIfNeeded() {
         guard nav.highlightToken != lastHighlightToken else { return }
-        guard let hl = nav.highlightTarget, hl.pageKey == PageName.key(pageName) else { return }
+        guard let hl = nav.highlightTarget, hl.pageKey == PageName.key(pageName),
+              hl.inSidebar == inPane else { return }
         lastHighlightToken = nav.highlightToken
-        // Match by id, then by the index's preorder position (survives a
-        // re-parse that changed the volatile id), then by content as a last
-        // resort. Empty content never matches — it would flash a random blank.
-        let byPosition = hl.position.flatMap {
-            app.document(for: pageName).blocks.path(atPreorderPosition: $0)
-        }.flatMap { path in rows.firstIndex { $0.path == path } }
-        guard let index = rows.firstIndex(where: { $0.block.id == hl.blockID })
-            ?? byPosition
-            ?? rows.firstIndex(where: { !hl.content.isEmpty && $0.block.content == hl.content })
-        else { return }
-        let blockID = rows[index].block.id
-        // Defer so the table finishes its post-reload layout — the row→cell
-        // mapping is briefly stale right after reloadData, so a cell fetched too
-        // early lands on the wrong row.
+        // Spent here: the click that made the request is the only navigation it
+        // applies to. Left standing it would fire again in the next outline created
+        // for this page — which has handled no token at all — so a later page-title
+        // click, sidebar pick, or ⌘K would jump to this block all over again.
+        nav.consumeHighlight()
+        guard let index = Self.highlightRow(
+            hl,
+            in: rows.map {
+                HighlightCandidate(id: $0.block.id, path: $0.path, content: $0.block.content)
+            },
+            pathAtPosition: { app.document(for: pageName).blocks.path(atPreorderPosition: $0) }
+        ) else { return }
+        requestReveal(of: rows[index].block.id)
+    }
+
+    /// Asks for a block to be scrolled to and flashed: as soon as the geometry means
+    /// something, and again after each re-measure that moves the row, until the
+    /// layout settles.
+    private func requestReveal(of blockID: UUID) {
+        revealRequest = Reveal(blockID: blockID, rowMinY: nil,
+                               until: CACurrentMediaTime() + 2)
+        revealIfPossible()
+    }
+
+    /// Deferred: the callers are the table's own reload/layout/height passes, and
+    /// scrolling or fetching a cell from inside one of those is the reentrancy this
+    /// controller avoids everywhere else — the cell handed back mid-pass is
+    /// reconfigured immediately afterwards, taking the flash with it.
+    private func revealIfPossible() {
+        guard revealRequest != nil, !revealScheduled else { return }
+        revealScheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.tableView.layoutSubtreeIfNeeded()
-            guard let row = self.rows.firstIndex(where: { $0.block.id == blockID }) else { return }
-            self.tableView.scrollRowToVisible(row)
-            self.tableView.layoutSubtreeIfNeeded()
-            if let cell = self.tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
-                as? OutlineRowCell {
-                cell.flash()
-            }
+            self?.revealScheduled = false
+            self?.revealNow()
         }
+    }
+
+    private func revealNow() {
+        guard let request = revealRequest else { return }
+        guard CACurrentMediaTime() < request.until else {
+            revealRequest = nil
+            return
+        }
+        guard let row = rows.firstIndex(where: { $0.block.id == request.blockID }) else { return }
+        // Settled for now — but the request is kept until its window runs out: more
+        // re-measures follow, and each can move the row out of view again.
+        let topOverlap = tableView.enclosingScrollView?.contentInsets.top ?? 0
+        if Self.revealHasSettled(rowRect: tableView.rect(ofRow: row),
+                                 visibleRect: tableView.visibleRect,
+                                 topOverlap: topOverlap,
+                                 scrolledTo: request.rowMinY) {
+            return
+        }
+        // Scroll so the row clears the toolbar band and has a row's worth of margin
+        // around it. `scrollRowToVisible` stops as soon as a row is *minimally* inside
+        // the clip, and the clip's top is under the toolbar, so it was content to
+        // leave the clicked row as a sliver beneath it.
+        let margin = OutlineRowCell.minRowHeight
+        var target = tableView.rect(ofRow: row)
+        target.origin.y -= topOverlap + margin
+        target.size.height += topOverlap + margin * 2
+        tableView.scrollToVisible(target)
+        tableView.layoutSubtreeIfNeeded()
+        revealRequest?.rowMinY = tableView.rect(ofRow: row).minY
+        guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            as? OutlineRowCell else { return }
+        // Cells are reused, so a flash still running on another row goes out first —
+        // including one this reveal itself left on a cell that has since moved on.
+        if flashedCell !== cell { flashedCell?.cancelFlash() }
+        cell.flash()
+        flashedCell = cell
+        flashedBlockID = request.blockID
     }
 
     /// Diffs the store's current state against the displayed rows; reloads
@@ -1209,14 +1359,14 @@ final class OutlineEditorController: NSObject {
     /// rows. Unchanged rows keep their live cells untouched.
     private func applyRowChanges(from old: [Row]) -> Set<UUID> {
         guard tableView.numberOfRows == old.count else {
-            tableView.reloadData()
+            reloadAllRows()
             return Set(rows.map(\.block.id))
         }
         let diff = rows.map(\.block.id).difference(from: old.map(\.block.id))
         // A wholesale change (an external reload re-mints every volatile id)
         // diffs into ~2n edits; a plain reload is cheaper.
         guard diff.count <= max(8, rows.count / 2) else {
-            tableView.reloadData()
+            reloadAllRows()
             return Set(rows.map(\.block.id))
         }
         if !diff.isEmpty {
@@ -1336,6 +1486,7 @@ final class OutlineEditorController: NSObject {
         } else {
             tableView.invalidateIntrinsicContentSize()
         }
+        revealIfPossible()   // the rows just changed height under any pending reveal
     }
 
     // MARK: - Focus and the shared editor
@@ -1457,7 +1608,7 @@ final class OutlineEditorController: NSObject {
         selectedRows = rows
         selectionAnchor = anchor
         selectionActive = active ?? anchor   // the moving end for Shift+↑/↓
-        tableView.reloadData()
+        reloadAllRows()
     }
 
     private func clearSelection() {
@@ -2258,6 +2409,13 @@ extension OutlineEditorController: NSTableViewDataSource, NSTableViewDelegate {
             withIdentifier: OutlineRowCell.reuseIdentifier, owner: nil
         ) as? OutlineRowCell ?? OutlineRowCell(frame: .zero)
         cell.identifier = OutlineRowCell.reuseIdentifier
+        // Cells are reused: this one may be the one carrying the flash, now handed
+        // a different block. Left alone, the flash would go on lighting up a row
+        // nobody clicked (two lit rows, once the real one is flashed as well).
+        if cell === flashedCell, model.block.id != flashedBlockID {
+            cell.cancelFlash()
+            flashedCell = nil
+        }
         var isQuote = false
         var isCode = false
         switch BlockKind.classify(model.block.content) {

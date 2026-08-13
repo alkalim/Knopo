@@ -108,6 +108,8 @@ extension Array where Element == RightPane {
 /// query / backlink / tag result is clicked. Matched by `blockID` first, then by
 /// `content` — block UUIDs aren't stable across a re-parse unless `id::`-pinned,
 /// so the content fallback keeps the highlight working when the id has drifted.
+/// One request belongs to one click: the outline that applies it clears it
+/// (`Navigator.consumeHighlight`).
 struct BlockHighlight: Equatable {
     let pageKey: String
     let blockID: UUID
@@ -116,6 +118,10 @@ struct BlockHighlight: Equatable {
     /// freshly-parsed page when its volatile id no longer matches (SPEC §7.1),
     /// so the flash lands even on un-`id::`-persisted blocks.
     let position: Int?
+    /// Which surface the click asked for, so the request is applied by the
+    /// outline it was meant for — a `⇧`-click's pane, or the document area — and
+    /// not by whichever of the two happens to present the page first.
+    let inSidebar: Bool
 }
 
 /// Back/forward history (Cmd+[, Cmd+]).

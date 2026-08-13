@@ -319,21 +319,51 @@ final class OutlineRowCell: NSTableCellView {
     /// the eye to a block just navigated to (from a query/backlink/tag result).
     /// The overlay sits behind the text (which is on a clear background), so the
     /// content stays readable through the wash.
+    /// The running flash, so it can be called off. A cell is reused for other
+    /// rows, and a flash left to fade on its own would go on lighting up whatever
+    /// row the cell shows by then — two highlighted rows, neither necessarily the
+    /// one that was clicked.
+    private var flashOverlay: NSView?
+    private var flashFade: DispatchWorkItem?
+
+    /// Whether a flash is on this cell right now.
+    var isFlashing: Bool { flashOverlay != nil }
+
     func flash() {
+        cancelFlash()
         let overlay = NSView(frame: bounds)
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.45).cgColor
         overlay.layer?.cornerRadius = 4
         overlay.autoresizingMask = [.width, .height]
         addSubview(overlay, positioned: .below, relativeTo: container)
+        flashOverlay = overlay
         // Hold at full briefly so the eye catches it, then fade out.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        let fade = DispatchWorkItem { [weak self, weak overlay] in
+            guard let overlay, self?.flashOverlay === overlay else { return }
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 1.0
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 overlay.animator().alphaValue = 0
-            }, completionHandler: { overlay.removeFromSuperview() })
+            }, completionHandler: {
+                overlay.removeFromSuperview()
+                if self?.flashOverlay === overlay {
+                    self?.flashOverlay = nil
+                    self?.flashFade = nil
+                }
+            })
         }
+        flashFade = fade
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: fade)
+    }
+
+    /// Takes the flash off now — when the cell is handed a different row, or when a
+    /// later reveal flashes somewhere else.
+    func cancelFlash() {
+        flashFade?.cancel()
+        flashFade = nil
+        flashOverlay?.removeFromSuperview()
+        flashOverlay = nil
     }
 
     // MARK: - Layout (manual; matches the static height calculation)
