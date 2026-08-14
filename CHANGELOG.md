@@ -2,6 +2,20 @@
 
 Notable changes per release, newest first. Dates are release dates.
 
+## v0.6.2 (2026-08-14)
+
+A maintenance release: navigation fixes around results, `⌘J`, and page links.
+
+**Fixes**
+- A click in query, backlink or tag results lands on that block, and highlights only it.
+- A page opened from the sidebar or search starts at the top, instead of at a block clicked earlier in results.
+- `⌘J` reaches today's writing block from anywhere.
+- A link to a namespaced page such as `Tests/Page1` opens it, not a stub.
+
+**Improved**
+- Bullets in embeds and query results match the outline's own.
+- A new graph opens on a refreshed welcome page, already favourited.
+
 ## v0.6.1 (2026-08-05)
 
 A maintenance release: typing and saving stay quick in large pages, and a round of editing, journal and sidebar fixes.
