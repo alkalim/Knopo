@@ -101,6 +101,7 @@ whole blocks rather than text.
 | `Enter` | Edit the selected block. |
 | `Tab` / `⇧Tab` | Indent or outdent the selected blocks. |
 | `Delete` | Delete the selection and its selected subtrees. |
+| `⌘X` | Cut selected blocks: copies them as Markdown and removes them, as one undo step. |
 | `⌘C` | Copy selected blocks as Markdown. |
 | `⌘V` | Paste blocks after the selection. |
 | `⌘A` | Select all visible blocks in the outline. |

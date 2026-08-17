@@ -198,6 +198,16 @@ import KnopoCore
             == NSRect(x: 0, y: 152, width: 700, height: 848))
     }
 
+    /// `⌘X` on selected blocks is one action, so the undo menu offers to bring them
+    /// back rather than naming a delete the user never asked for.
+    @MainActor
+    @Test func aCutIsLabelledAsACutInUndo() {
+        #expect(OutlineEditorController.removalLabel(count: 1, isCut: true) == "Cut Block")
+        #expect(OutlineEditorController.removalLabel(count: 3, isCut: true) == "Cut Blocks")
+        #expect(OutlineEditorController.removalLabel(count: 1, isCut: false) == "Delete Block")
+        #expect(OutlineEditorController.removalLabel(count: 3, isCut: false) == "Delete Blocks")
+    }
+
     /// A query/backlink result row links as `knopo://page/<name>?block=<id>`, and
     /// a namespaced name percent-encodes its `/`. Decoding that name back with
     /// `lastPathComponent` kept only the trailing part, so clicking the row opened

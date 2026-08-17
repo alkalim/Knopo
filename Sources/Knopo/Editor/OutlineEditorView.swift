@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 
 
+
 /// The outline editor (SPEC §5.4, §15): an AppKit NSTableView whose rows are
 /// the visible blocks. The focused block edits raw Markdown in one shared
 /// NSTextView; unfocused blocks render via BlockRenderer.
@@ -96,13 +97,23 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
 
 /// The outline lives inside the page's SwiftUI ScrollView, so the table
 /// reports its full content height as intrinsic size and never scrolls itself.
-final class OutlineTableView: NSTableView {
+final class OutlineTableView: NSTableView, NSMenuItemValidation {
 
     var onWidthChange: (() -> Void)?
     /// Every layout pass, so a pending reveal can notice that the rows moved under
     /// it — including AppKit's own re-measures, which no delegate call announces.
     var onDidLayout: (() -> Void)?
     var onLiveResizeEnd: (() -> Void)?
+    /// Clipboard actions for node selection (SPEC §13), so the Edit menu's Cut,
+    /// Copy and Paste act on the selected blocks — and grey out with no selection —
+    /// rather than only their shortcuts working.
+    var onCut: (() -> Void)?
+    var onCopy: (() -> Void)?
+    var onPaste: (() -> Void)?
+    var hasBlockSelection: (() -> Bool)?
+    /// Select All, which AppKit would otherwise answer with its own row selection —
+    /// invisible here, since the outline draws the node selection it keeps itself.
+    var onSelectAllBlocks: (() -> Bool)?
     /// Returns true if the controller consumed the key (node-selection mode).
     var onKeyDown: ((NSEvent) -> Bool)?
     /// A drag left the table (or ended without a drop) — cancels spring-loading.
@@ -157,6 +168,24 @@ final class OutlineTableView: NSTableView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+
+    @objc func cut(_ sender: Any?) { onCut?() }
+    @objc func copy(_ sender: Any?) { onCopy?() }
+    @objc func paste(_ sender: Any?) { onPaste?() }
+
+    override func selectAll(_ sender: Any?) {
+        if onSelectAllBlocks?() == true { return }
+        super.selectAll(sender)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(cut(_:)), #selector(copy(_:)), #selector(paste(_:)):
+            return hasBlockSelection?() ?? false
+        default:
+            return true
+        }
+    }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         onDragExited?()
@@ -394,6 +423,11 @@ final class OutlineEditorController: NSObject {
         tableView.onDidLayout = { [weak self] in self?.revealIfPossible() }
         tableView.onLiveResizeEnd = { [weak self] in self?.liveResizeDidEnd() }
         tableView.onKeyDown = { [weak self] in self?.handleSelectionKeyDown($0) ?? false }
+        tableView.onCut = { [weak self] in self?.cutSelection() }
+        tableView.onCopy = { [weak self] in self?.copySelection() }
+        tableView.onPaste = { [weak self] in self?.pasteSelection() }
+        tableView.hasBlockSelection = { [weak self] in self?.hasSelection ?? false }
+        tableView.onSelectAllBlocks = { [weak self] in self?.selectAllBlocks() ?? false }
         tableView.onDragExited = { [weak self] in self?.cancelSpringLoad() }
         tableView.registerForDraggedTypes([Self.blockDragType, .fileURL])
     }
@@ -1650,6 +1684,10 @@ final class OutlineEditorController: NSObject {
             guard hasSelection else { return false }
             clearSelection()
             return true
+        case 7 where flags.contains(.command): // Cmd+X
+            guard hasSelection else { return false }
+            cutSelection()
+            return true
         case 8 where flags.contains(.command): // Cmd+C
             guard hasSelection else { return false }
             copySelection()
@@ -1659,11 +1697,19 @@ final class OutlineEditorController: NSObject {
             pasteSelection()
             return true
         case 0 where flags.contains(.command): // Cmd+A
-            setSelection(Set(rows.indices), anchor: 0, active: rows.count - 1)
-            return true
+            return selectAllBlocks()
         default:
             return false
         }
+    }
+
+    /// Selects every visible block. Returns false when there is nothing to select,
+    /// leaving `selectAll:` to AppKit.
+    @discardableResult
+    private func selectAllBlocks() -> Bool {
+        guard focusedBlockID == nil, !rows.isEmpty else { return false }
+        setSelection(Set(rows.indices), anchor: 0, active: rows.count - 1)
+        return true
     }
 
     private func stepSelection(up: Bool, extend: Bool) {
@@ -1729,14 +1775,32 @@ final class OutlineEditorController: NSObject {
     }
 
     private func copySelection() {
-        // Copy exactly the selected rows (re-based to the shallowest one's
+        guard let markdown = selectionMarkdown() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+    }
+
+    /// `⌘X`: the same Markdown `⌘C` would write, and the same removal `⌦` would
+    /// make — as one undo step, so one undo brings the blocks back. The pasteboard
+    /// is written only once the removal has gone ahead: declining the "referenced
+    /// elsewhere" prompt leaves both the page and the clipboard as they were.
+    private func cutSelection() {
+        guard let markdown = selectionMarkdown() else { return }
+        guard deleteSelection(labelledCut: true) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+    }
+
+    /// The selected blocks as Markdown, or nil when there is nothing to write.
+    private func selectionMarkdown() -> String? {
+        // Take exactly the selected rows (re-based to the shallowest one's
         // depth), not each block's whole subtree — selecting a parent plus one
         // child must not drag in the parent's *unselected* children. Exception:
         // a collapsed block's children are hidden and can't be selected, so its
         // full subtree is included.
         let doc = app.document(for: pageName)
         let selected = selectedRows.sorted().filter { rows.indices.contains($0) }
-        guard let baseDepth = selected.map({ rows[$0].depth }).min() else { return }
+        guard let baseDepth = selected.map({ rows[$0].depth }).min() else { return nil }
         var out = ""
         for row in selected {
             // Resolve the live block (row caches go stale for a block whose
@@ -1754,9 +1818,7 @@ final class OutlineEditorController: NSObject {
                 for line in lines.dropFirst() { out += pad + "  " + line + "\n" }
             }
         }
-        guard !out.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(out, forType: .string)
+        return out.isEmpty ? nil : out
     }
 
     /// Cmd+V in node-selection mode: paste the clipboard's blocks right after the
@@ -1783,9 +1845,13 @@ final class OutlineEditorController: NSObject {
         if let anchor = newSel.min() { setSelection(newSel, anchor: anchor) }
     }
 
-    private func deleteSelection() {
+    /// Removes the selected blocks. Returns false when there was nothing to remove
+    /// or the reference prompt was declined, so `cutSelection` can leave the
+    /// pasteboard alone.
+    @discardableResult
+    private func deleteSelection(labelledCut: Bool = false) -> Bool {
         let ids = selectedRows.sorted().compactMap { rows.indices.contains($0) ? rows[$0].block.id : nil }
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty else { return false }
         // Aggregate incoming block-references over every selected subtree (§7.4).
         var subtreeIDs: [UUID] = []
         let doc0 = app.document(for: pageName)
@@ -1799,14 +1865,25 @@ final class OutlineEditorController: NSObject {
             alert.messageText = "These blocks are referenced in \(count) place\(count == 1 ? "" : "s"). Delete anyway?"
             alert.addButton(withTitle: "Delete")
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard alert.runModal() == .alertFirstButtonReturn else { return false }
         }
         var doc = app.document(for: pageName)
         Self.removeBlocks(Set(ids), from: &doc.blocks)
         if doc.blocks.isEmpty { doc.blocks = [Block(content: "")] } // keep one block
-        commitStructural(doc, label: ids.count == 1 ? "Delete Block" : "Delete Blocks")
+        commitStructural(doc, label: Self.removalLabel(count: ids.count, isCut: labelledCut))
         clearSelection()
         reloadAndFocus(nil, selection: nil)
+        return true
+    }
+
+    /// Undo-menu wording for a removal: a cut is one action, not a copy and a delete.
+    static func removalLabel(count: Int, isCut: Bool) -> String {
+        switch (isCut, count == 1) {
+        case (true, true): return "Cut Block"
+        case (true, false): return "Cut Blocks"
+        case (false, true): return "Delete Block"
+        case (false, false): return "Delete Blocks"
+        }
     }
 
     /// Recursively drops any block whose id is in `ids` (with its subtree).

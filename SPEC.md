@@ -456,10 +456,10 @@ The reference index updates with the page (same cadence) and on external file ch
 ## 13. Editing semantics worth pinning down
 
 - **Undo/redo** is per-session, global, and crosses block boundaries (a page rename or a multi-block paste is one undo step).
-- **Copy** of a selected block subtree puts Markdown (with indentation) on the clipboard; **paste** of multi-line Markdown splits into blocks by list structure, or by lines if no list markers present. Exception: pasting into a quote, fenced-code, or table block — or pasting table-shaped text — keeps the lines inside that block (each is a single multi-line block by design).
+- **Copy** of a selected block subtree puts Markdown (with indentation) on the clipboard; **cut** writes the same Markdown and removes the blocks as one undo step (and writes nothing if the reference prompt in §7.4 is declined); **paste** of multi-line Markdown splits into blocks by list structure, or by lines if no list markers present. Exception: pasting into a quote, fenced-code, or table block — or pasting table-shaped text — keeps the lines inside that block (each is a single multi-line block by design).
 - **Image paste** imports the file or bitmap into `assets/` and inserts its Markdown at the caret. Undo removes the Markdown edit, but imported asset files remain.
 - **Delete page** moves its file to the OS trash. Incoming `[[refs]]` now point to a stub; incoming `((refs))` become broken (§7.3) after the confirmation prompt (§7.4) — the prompt aggregates counts for the whole page.
-- **Selection**: `Esc` from text editing selects the block (node selection); arrows extend selection across siblings; `Tab`/indent, move, delete then operate on the whole selection.
+- **Selection**: `Esc` from text editing selects the block (node selection); arrows extend selection across siblings; `Tab`/indent, move, delete, cut/copy/paste and Select All then operate on the whole selection — from the Edit menu as well as the keyboard.
 
 ---
 
