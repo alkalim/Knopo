@@ -54,7 +54,7 @@ struct ReferencesSection: View {
                                 ? "chevron.right" : "chevron.down")
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(.tertiary)
-                            Text(pageDisplayTitle(sourcePage))
+                            Text(app.displayTitle(for: sourcePage))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Color.accentColor)
                         }
@@ -115,7 +115,7 @@ struct ReferencesSection: View {
                     ForEach(hits, id: \.blockID) { hit in
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(pageDisplayTitle(hit.pageDisplayName))
+                                Text(app.displayTitle(for: hit.pageDisplayName))
                                     .font(.caption).foregroundStyle(.secondary)
                                 Text(AttributedString(BlockRenderer.render(
                                     content: hit.content, context: renderContext())))
@@ -156,6 +156,7 @@ struct ReferencesSection: View {
         BlockRenderer.Context(
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
+            journalDateFormat: app.journalDateFormat,
             // A reference row is a snippet in a SwiftUI `Text`: nothing there
             // draws a grid, so a table block shows its raw source (§5.2).
             tables: false
@@ -203,6 +204,7 @@ struct BacklinkRow: View {
                                 app?.store.resolveBlock(id)?.block.content
                             },
                             assetsDir: app.store.assetsDir,
+                            journalDateFormat: app.journalDateFormat,
                             tables: false // raw source in a snippet row (§5.2)
                         )
                     )))

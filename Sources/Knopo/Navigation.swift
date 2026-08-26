@@ -228,8 +228,10 @@ enum KnopoURL {
 /// ("Apr 21st, 2026"); other pages use the literal name. Shared by the
 /// All Pages view, references section, search palette, query results, and pane
 /// titles.
-func pageDisplayTitle(_ name: String) -> String {
-    JournalDate(pageName: name)?.displayName ?? name
+func pageDisplayTitle(
+    _ name: String, dateFormat: JournalDateFormat = .default
+) -> String {
+    JournalDate(pageName: name)?.displayName(using: dateFormat) ?? name
 }
 
 /// Page-management actions shared by the page header and the right-pane card
@@ -243,7 +245,7 @@ enum PageActions {
         let ids = doc.blocks.flattened.map(\.id)
         let refCount = (try? app.store.cache.incomingRefCount(forBlockIDs: ids)) ?? 0
         let alert = NSAlert()
-        alert.messageText = "Delete “\(doc.displayTitle)”?"
+        alert.messageText = "Delete “\(app.displayTitle(for: doc))”?"
         var info = "The file moves to the Trash. Links to this page become stubs."
         if refCount > 0 {
             info += " \(refCount) block reference\(refCount == 1 ? "" : "s") into this page will break."

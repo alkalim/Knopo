@@ -357,6 +357,7 @@ final class OutlineEditorController: NSObject {
     private var renderedWithZoom = BlockRenderer.zoom
     private var renderedWithDensity = BlockRenderer.density
     private var renderedWithWeight = BlockRenderer.contentWeight
+    private var renderedWithDateFormat: JournalDateFormat
     private var widthRefreshScheduled = false
     private var needsWidthRefreshAfterLiveResize = false
 
@@ -398,6 +399,7 @@ final class OutlineEditorController: NSObject {
         self.app = app
         self.nav = nav
         self.editor = BlockEditorTextView.create()
+        self.renderedWithDateFormat = app.journalDateFormat
         super.init()
         editor.actions = self
         editor.autocomplete = autocomplete
@@ -536,10 +538,12 @@ final class OutlineEditorController: NSObject {
         let fontZoomChanged = BlockRenderer.zoom != renderedWithZoom
         let densityChanged = BlockRenderer.density != renderedWithDensity
         let weightChanged = BlockRenderer.contentWeight != renderedWithWeight
+        let dateFormatChanged = app.journalDateFormat != renderedWithDateFormat
         renderedWithBrackets = BlockRenderer.bracketsEnabled
         renderedWithZoom = BlockRenderer.zoom
         renderedWithDensity = BlockRenderer.density
         renderedWithWeight = BlockRenderer.contentWeight
+        renderedWithDateFormat = app.journalDateFormat
         if pageName != self.pageName || zoom != self.zoom {
             revealRequest = nil
             self.pageName = pageName
@@ -552,7 +556,8 @@ final class OutlineEditorController: NSObject {
             rebuildRows()
             reloadAllRows()
             tableView.invalidateIntrinsicContentSize()
-        } else if bracketsChanged || fontZoomChanged || densityChanged || weightChanged {
+        } else if bracketsChanged || fontZoomChanged || densityChanged || weightChanged
+                    || dateFormatChanged {
             // A global rendering preference flipped (brackets, content zoom, or
             // text density): re-render the cached rows and re-measure heights.
             reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
@@ -982,6 +987,7 @@ final class OutlineEditorController: NSObject {
         hasher.combine(BlockRenderer.zoom)
         hasher.combine(BlockRenderer.density)
         hasher.combine(BlockRenderer.contentWeight)
+        hasher.combine(app.journalDateFormat)
         // A table lays its columns out against the row width (§5.2), so its
         // render — alone among blocks — goes stale when the width changes.
         if BlockKind.classify(block.content).isTable { hasher.combine(contentWidth) }
@@ -1028,6 +1034,7 @@ final class OutlineEditorController: NSObject {
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
             inlineQuoteBar: false, // the row cell draws one continuous bar
+            journalDateFormat: app.journalDateFormat,
             resolveEmbed: { [weak self] target in self?.renderEmbed(target) },
             resolveQuery: { [weak self] expr in self?.renderQuery(expr) },
             contentWidth: contentWidth,
@@ -1099,6 +1106,7 @@ final class OutlineEditorController: NSObject {
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
             inlineQuoteBar: true,
+            journalDateFormat: app.journalDateFormat,
             resolveEmbed: { [weak self] t in
                 self?.renderEmbed(t, embedDepth: embedDepth + 1, visited: nextVisited)
             },
@@ -1248,6 +1256,7 @@ final class OutlineEditorController: NSObject {
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
             inlineQuoteBar: true,
+            journalDateFormat: app.journalDateFormat,
             tables: false) // a table in a result row shows as its raw source (§5.2)
         var lastPage: String?
         for hit in result.hits {
@@ -1255,8 +1264,7 @@ final class OutlineEditorController: NSObject {
                 lastPage = hit.pageDisplayName
                 // Journal pages show their pretty date ("Apr 21st, 2026"), not
                 // the raw ISO / Logseq underscore filename form.
-                let title = JournalDate(pageName: hit.pageDisplayName)?.displayName
-                    ?? hit.pageDisplayName
+                let title = app.displayTitle(for: hit.pageDisplayName)
                 line(NSAttributedString(string: title, attributes: [
                     .font: NSFont.systemFont(ofSize: BlockRenderer.baseFontSize, weight: .semibold),
                     .foregroundColor: NSColor.secondaryLabelColor,
@@ -2190,7 +2198,7 @@ final class OutlineEditorController: NSObject {
     private func previewAttributedString(forPage name: String) -> NSAttributedString? {
         let doc = app.document(for: name)
         let out = NSMutableAttributedString()
-        out.append(NSAttributedString(string: doc.displayTitle, attributes: [
+        out.append(NSAttributedString(string: app.displayTitle(for: doc), attributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .bold),
             .foregroundColor: NSColor.labelColor,
         ]))
@@ -2216,6 +2224,7 @@ final class OutlineEditorController: NSObject {
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
             inlineQuoteBar: false,
+            journalDateFormat: app.journalDateFormat,
             tables: false)) // no room for a grid in a popover (§5.2)
     }
 

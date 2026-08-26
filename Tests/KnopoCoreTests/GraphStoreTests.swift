@@ -428,4 +428,18 @@ import Foundation
         expectEqual(try store.cache.allPages().count, 1)
         expectEqual(try store.cache.allPages().first?.displayName, "A")
     }
+
+    @Test func indexMaintenanceRebuildsPagesAndPreservesRecents() throws {
+        let store = try makeGraph(["A": "- alpha\n", "B": "- beta\n"])
+        try store.cache.recordVisit(pageKey: "a")
+        try store.indexMaintenance.rebuild()
+        let rebuiltSize = store.indexMaintenance.sizeOnDisk()
+        try store.indexMaintenance.rebuild()
+
+        expectEqual(Set(try store.cache.allPages().map(\.displayName)), Set(["A", "B"]))
+        expectEqual(try store.cache.searchBlocks("alpha").first?.pageDisplayName, "A")
+        expectEqual(try store.cache.recentPageKeys(), ["a"])
+        expectTrue(rebuiltSize > 0)
+        expectEqual(store.indexMaintenance.sizeOnDisk(), rebuiltSize)
+    }
 }

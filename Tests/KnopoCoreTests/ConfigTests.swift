@@ -10,6 +10,7 @@ import Foundation
         config.rightPanes = ["page\tIdeas\t", "tag\tproject", "journalHome"]
         config.rightPaneFraction = 0.4
         config.allPagesCollapsedSections = ["journal", "namespace\tProjects"]
+        config.dateFormat = JournalDateFormat(pattern: "yyyy/MM/dd")
 
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("knopo-cfg-\(UUID().uuidString)/config.json")
@@ -22,6 +23,7 @@ import Foundation
             loaded.allPagesCollapsedSections,
             config.allPagesCollapsedSections
         )
+        expectEqual(loaded.dateFormat, config.dateFormat)
     }
 
     /// An older config file (no layout keys) still loads, with defaults — the
@@ -39,8 +41,41 @@ import Foundation
         let loaded = GraphConfig.load(from: url)
         expectEqual(loaded.favourites, ["Home"])
         expectEqual(loaded.theme, "dark")
+        expectEqual(loaded.dateFormat, .default)
         expectTrue(loaded.rightPanes.isEmpty)
         expectTrue(loaded.rightPaneFraction == nil)
         expectTrue(loaded.allPagesCollapsedSections.isEmpty)
+    }
+
+    @Test func legacyDateFormatNormalizesAndThemeIsNotReencoded() throws {
+        let json = """
+        { "dateFormat": "MMM d'th', yyyy", "theme": "dark" }
+        """
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("knopo-cfg-\(UUID().uuidString)")
+        let input = root.appendingPathComponent("input.json")
+        let output = root.appendingPathComponent("output.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(json.utf8).write(to: input)
+
+        let loaded = GraphConfig.load(from: input)
+        expectEqual(loaded.dateFormat, .default)
+        expectEqual(loaded.theme, "dark")
+        try loaded.save(to: output)
+        let saved = try String(contentsOf: output, encoding: .utf8)
+        expectTrue(saved.contains("MMM d{ordinal}, yyyy"))
+        expectFalse(saved.contains("\"theme\""))
+    }
+
+    @Test func invalidPersistedDateFormatFallsBackToDefault() throws {
+        let json = "{ \"dateFormat\": \"{unknown}\" }"
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("knopo-cfg-\(UUID().uuidString)/config.json")
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try Data(json.utf8).write(to: url)
+        expectEqual(GraphConfig.load(from: url).dateFormat, .default)
     }
 }

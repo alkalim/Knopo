@@ -9,6 +9,7 @@ import KnopoCore
 @MainActor
 final class AppState: ObservableObject {
     let store: GraphStore
+    let preferences: Preferences
 
     /// Bumped whenever index/page data changes so derived views refetch.
     @Published var dataVersion = 0
@@ -18,16 +19,7 @@ final class AppState: ObservableObject {
     /// Shared by every All Pages view for this graph and persisted in config.
     @Published private(set) var allPagesCollapsedSections: Set<String> = []
 
-    /// Show faint `[[ ]]` around page references (per-app viewing preference).
-    /// Mirrors UserDefaults, which `BlockRenderer` reads.
-    @Published var showPageRefBrackets: Bool = UserDefaults.standard.bool(
-        forKey: BlockRenderer.pageRefBracketsKey
-    ) {
-        didSet {
-            UserDefaults.standard.set(showPageRefBrackets, forKey: BlockRenderer.pageRefBracketsKey)
-            dataVersion += 1
-        }
-    }
+    private var preferenceObservers: Set<AnyCancellable> = []
 
     private var watcher: FileWatcher?
     private let pageSaveQueue = DispatchQueue(
@@ -76,11 +68,31 @@ final class AppState: ObservableObject {
     /// steady typing could defer a save indefinitely; and typing just slower than
     /// the debounce used to write and reindex the page on *every* character.
     /// Overridable so tests don't have to sleep for seconds.
-    init(store: GraphStore, saveDebounce: TimeInterval = 2, saveCeiling: TimeInterval = 10) {
+    convenience init(
+        store: GraphStore,
+        saveDebounce: TimeInterval = 2,
+        saveCeiling: TimeInterval = 10
+    ) {
+        self.init(
+            store: store, preferences: .standard,
+            saveDebounce: saveDebounce, saveCeiling: saveCeiling)
+    }
+
+    init(
+        store: GraphStore,
+        preferences: Preferences,
+        saveDebounce: TimeInterval = 2,
+        saveCeiling: TimeInterval = 10
+    ) {
         self.store = store
+        self.preferences = preferences
         self.saveDebounce = saveDebounce
         self.saveCeiling = saveCeiling
         allPagesCollapsedSections = Set(store.config.allPagesCollapsedSections)
+        preferences.$renderRevision
+            .dropFirst()
+            .sink { [weak self] _ in self?.dataVersion += 1 }
+            .store(in: &preferenceObservers)
         store.onExternalChange = { [weak self] _ in
             self?.dataVersion += 1
         }
@@ -463,48 +475,57 @@ final class AppState: ObservableObject {
         dataVersion += 1
     }
 
+    // MARK: - Graph display settings
+
+    var journalDateFormat: JournalDateFormat { store.config.dateFormat }
+
+    func displayTitle(for pageName: String) -> String {
+        JournalDate(pageName: pageName)?.displayName(using: journalDateFormat) ?? pageName
+    }
+
+    func displayTitle(for document: PageDocument) -> String {
+        document.displayTitle(using: journalDateFormat)
+    }
+
+    func updateJournalDateFormat(_ format: JournalDateFormat) throws {
+        guard format != store.config.dateFormat else { return }
+        try store.updateConfig { $0.dateFormat = format }
+        dataVersion += 1
+    }
+
+    func rebuildIndex() async throws {
+        closePendingEdit?()
+        flushPendingSaves()
+        let maintenance = store.indexMaintenance
+        try await withCheckedThrowingContinuation { continuation in
+            pageSaveQueue.async {
+                continuation.resume(with: Result { try maintenance.rebuild() })
+            }
+        }
+        dataVersion += 1
+    }
+
     // MARK: - Content zoom (Cmd +/−/0)
 
     /// Bumping `dataVersion` makes every open outline (main view + panes) notice
     /// the new `BlockRenderer.zoom` and re-render at the new size.
     func adjustZoom(by step: CGFloat) {
-        let next = (BlockRenderer.zoom + step)
-        BlockRenderer.zoom = min(max(next, BlockRenderer.minZoom), BlockRenderer.maxZoom)
-        dataVersion += 1
+        preferences.zoom += step
     }
 
     func resetZoom() {
-        guard BlockRenderer.zoom != 1 else { return }
-        BlockRenderer.zoom = 1
-        dataVersion += 1
+        preferences.zoom = 1
     }
 
     /// Text density (View ▸ Line Spacing): scales the vertical breathing room
     /// within and between blocks in 10% steps. Like zoom, a `dataVersion` bump
     /// makes every open outline re-render and re-measure at the new spacing.
     func adjustDensity(by step: CGFloat) {
-        let next = (BlockRenderer.density + step)
-        BlockRenderer.density = min(max(next, BlockRenderer.minDensity), BlockRenderer.maxDensity)
-        dataVersion += 1
+        preferences.density += step
     }
 
     func resetDensity() {
-        guard BlockRenderer.density != 1 else { return }
-        BlockRenderer.density = 1
-        dataVersion += 1
-    }
-
-    /// Body-text font weight (View ▸ Font Weight). Stored (not a passthrough to
-    /// the `BlockRenderer` global) so the menu's radio state is observable and
-    /// its checkmark tracks the selection; the didSet feeds the render-time
-    /// global and, like zoom/density, bumps `dataVersion` so every open outline
-    /// re-renders at the new weight.
-    @Published var contentWeight: BlockRenderer.ContentWeight = BlockRenderer.contentWeight {
-        didSet {
-            guard contentWeight != oldValue else { return }
-            BlockRenderer.contentWeight = contentWeight   // persists + render source
-            dataVersion += 1
-        }
+        preferences.density = 1
     }
 
     // MARK: - Persisted view layout (SPEC §12)

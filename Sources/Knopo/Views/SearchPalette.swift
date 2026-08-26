@@ -97,7 +97,7 @@ struct SearchPalette: View {
             case .page(let name):
                 Image(systemName: JournalDate(pageName: name) != nil ? "calendar" : "doc.text")
                     .foregroundStyle(.secondary)
-                Text(pageDisplayTitle(name))
+                Text(app.displayTitle(for: name))
             case .createPage(let name):
                 Image(systemName: "plus.circle").foregroundStyle(.green)
                 Text("Create page “\(name)”")
@@ -105,7 +105,7 @@ struct SearchPalette: View {
                 Image(systemName: "text.alignleft").foregroundStyle(.tertiary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(snippet(hit.content)).lineLimit(1)
-                    Text(pageDisplayTitle(hit.pageDisplayName))
+                    Text(app.displayTitle(for: hit.pageDisplayName))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

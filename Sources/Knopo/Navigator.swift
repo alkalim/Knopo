@@ -210,7 +210,7 @@ final class Navigator: ObservableObject {
 
     private func historyTitle(_ target: NavTarget) -> String {
         switch target {
-        case .page(let name, _): return pageDisplayTitle(name)
+        case .page(let name, _): return app.displayTitle(for: name)
         case .tag(let tag): return "#\(tag)"
         case .journalHome: return "Journal"
         case .allPages: return "All Pages"

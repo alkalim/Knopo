@@ -8,9 +8,10 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     /// Ordered list of favourite tag names (normalized lowercase). Tags are
     /// labels, not pages (§8), so they favourite into their own list.
     public var favouriteTags: [String] = []
-    /// Display format for journal dates; only the default is implemented.
-    public var dateFormat: String = "MMM d'th', yyyy"
-    /// "system" | "light" | "dark"
+    /// Display format for journal dates.
+    public var dateFormat: JournalDateFormat = .default
+    /// Legacy per-graph appearance value. Decoded for the one-time migration to
+    /// app preferences, but deliberately no longer encoded.
     public var theme: String = "system"
     /// Right-sidebar layout (SPEC §12), persisted so a graph reopens as left.
     /// Encoded `NavTarget`s for the open panes (newest first); the app layer
@@ -36,12 +37,27 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         favourites = try c.decodeIfPresent([String].self, forKey: .favourites) ?? []
         favouriteTags = try c.decodeIfPresent([String].self, forKey: .favouriteTags) ?? []
-        dateFormat = try c.decodeIfPresent(String.self, forKey: .dateFormat) ?? "MMM d'th', yyyy"
+        if let decodedFormat = try? c.decode(JournalDateFormat.self, forKey: .dateFormat),
+           decodedFormat.validationError == nil {
+            dateFormat = decodedFormat
+        } else {
+            dateFormat = .default
+        }
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
         rightPanes = try c.decodeIfPresent([String].self, forKey: .rightPanes) ?? []
         rightPaneFraction = try c.decodeIfPresent(Double.self, forKey: .rightPaneFraction)
         allPagesCollapsedSections =
             try c.decodeIfPresent([String].self, forKey: .allPagesCollapsedSections) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(favourites, forKey: .favourites)
+        try c.encode(favouriteTags, forKey: .favouriteTags)
+        try c.encode(dateFormat, forKey: .dateFormat)
+        try c.encode(rightPanes, forKey: .rightPanes)
+        try c.encodeIfPresent(rightPaneFraction, forKey: .rightPaneFraction)
+        try c.encode(allPagesCollapsedSections, forKey: .allPagesCollapsedSections)
     }
 
     public static func load(from url: URL) -> GraphConfig {

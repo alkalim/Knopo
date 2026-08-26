@@ -24,6 +24,21 @@ graph/
 Knopo opens the last-used graph on the next launch. The journal is the home
 view, so a new graph opens on today's notes.
 
+## Settings
+
+Choose **Knopo > Settings…** (`⌘,`) for preferences that apply to the whole app:
+the system/light/dark theme, body font weight, page-link brackets, and the
+default journal date format copied to new graphs. Existing graphs keep their
+own format.
+The date picker includes common presets and custom Unicode date patterns;
+`d{ordinal}` adds the English `st`/`nd`/`rd`/`th` suffix.
+
+Settings that travel with a graph live in that graph's own sheet. Choose
+**File > Graph Settings…** (`⌥⌘,`), or hover over the graph name in the window
+toolbar and click its gear. There you can choose the graph's journal date
+format and see or rebuild its search index. Changes apply immediately. Zoom and
+line spacing remain repeatable View menu commands with keyboard shortcuts.
+
 ## Blocks and outlines
 
 A **block** is one item in an outline. It may contain text, Markdown, properties,
@@ -369,11 +384,12 @@ never by more, and edits with no net change do not touch the file at all. That
 matters if your graph lives in versioned cloud storage or on a share: Knopo tries
 not to produce a new version of a page for every keystroke.
 
-The SQLite index at `.knopo/cache.db` is rebuildable — if you ever delete it,
-remove its `cache.db-wal` and `cache.db-shm` companions too, and Knopo rebuilds
-the index from your Markdown on the next launch. Page and journal Markdown files
-are the source of note content; `.knopo/config.json` stores favourites and
-settings and should be backed up with the graph.
+The SQLite index at `.knopo/cache.db` is rebuildable from **Graph Settings**. If
+you delete it manually, remove its `cache.db-wal` and `cache.db-shm` companions
+too, and Knopo rebuilds the index from your Markdown on the next launch. Page
+and journal Markdown files are the source of note content;
+`.knopo/config.json` stores favourites and graph settings and should be backed
+up with the graph.
 
 A graph kept on a network share (SMB, NFS) works, but the index runs in a slower
 single-connection mode there, because those filesystems lack the shared memory

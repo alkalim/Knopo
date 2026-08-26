@@ -19,6 +19,35 @@ public enum GraphError: LocalizedError {
 /// (SPEC §2, §4.1). Owns file IO, the cache index, and config; pages are the
 /// source of truth, everything else is derived.
 public final class GraphStore {
+    /// The sendable, rebuildable portion of a graph. It owns no loaded pages or
+    /// authoritative config, so AppState can run maintenance off the main actor.
+    public struct IndexMaintenance: Sendable {
+        private let root: URL
+        private let cache: CacheDB
+
+        fileprivate init(root: URL, cache: CacheDB) {
+            self.root = root
+            self.cache = cache
+        }
+
+        public func rebuild() throws {
+            try cache.clearAll() // deliberately preserves graph recents
+            for (url, name, _, isJournal) in GraphStore.resolvedFiles(at: root) {
+                guard let stamp = GraphStore.stamp(of: url) else { continue }
+                try cache.indexPage(
+                    GraphStore.read(url: url, name: name, isJournal: isJournal),
+                    stamp: stamp)
+            }
+            try cache.setIndexVersion(CacheDB.indexVersion)
+        }
+
+        /// Logical SQLite database size. Unlike filesystem allocation for the
+        /// WAL/SHM sidecars, this is stable across equivalent rebuilds.
+        public func sizeOnDisk() -> Int64 {
+            cache.logicalSize()
+        }
+    }
+
     /// Immutable input for page persistence. `revision` ties a completed write
     /// back to the in-memory version it came from, so a slow older save cannot
     /// mark newer edits clean.
@@ -103,6 +132,9 @@ public final class GraphStore {
     public var assetsDir: URL { root.appendingPathComponent("assets", isDirectory: true) }
     public var configURL: URL { dotDir.appendingPathComponent("config.json") }
     public var conflictsDir: URL { dotDir.appendingPathComponent("conflicts", isDirectory: true) }
+    public var indexMaintenance: IndexMaintenance {
+        IndexMaintenance(root: root, cache: cache)
+    }
 
     public init(root: URL) throws {
         self.root = root
@@ -152,14 +184,15 @@ public final class GraphStore {
         if config.favourites != before { try? saveConfig() }
     }
 
-    private func pageFiles() -> [(url: URL, isJournal: Bool)] {
+    private static func pageFiles(at root: URL) -> [(url: URL, isJournal: Bool)] {
         let fm = FileManager.default
         func list(_ dir: URL, journal: Bool) -> [(URL, Bool)] {
             ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
                 .filter { $0.pathExtension.lowercased() == "md" }
                 .map { ($0, journal) }
         }
-        return list(pagesDir, journal: false) + list(journalsDir, journal: true)
+        return list(root.appendingPathComponent("pages", isDirectory: true), journal: false)
+            + list(root.appendingPathComponent("journals", isDirectory: true), journal: true)
     }
 
     /// `pageFiles()` with journal identity resolved. `PageName.key` already folds
@@ -169,10 +202,12 @@ public final class GraphStore {
     /// decide which spelling backs the day. Regular pages pass through unchanged.
     /// `name` is the on-disk stem (so `page(named:)`/`savePage` reach the real
     /// file); `key` is what the index and the `loaded` cache key on.
-    private func resolvedFiles() -> [(url: URL, name: String, key: String, isJournal: Bool)] {
+    private static func resolvedFiles(
+        at root: URL
+    ) -> [(url: URL, name: String, key: String, isJournal: Bool)] {
         var regular: [(url: URL, name: String, key: String, isJournal: Bool)] = []
         var journals: [String: (url: URL, name: String, native: Bool)] = [:]
-        for (url, isJournal) in pageFiles() {
+        for (url, isJournal) in pageFiles(at: root) {
             guard let name = PageName.name(fromFileName: url.lastPathComponent) else { continue }
             guard isJournal, let date = JournalDate(pageName: name) else {
                 regular.append((url, name, PageName.key(name), isJournal))
@@ -187,6 +222,10 @@ public final class GraphStore {
             }
         }
         return regular + journals.map { (key, j) in (j.url, j.name, key, true) }
+    }
+
+    private func resolvedFiles() -> [(url: URL, name: String, key: String, isJournal: Bool)] {
+        Self.resolvedFiles(at: root)
     }
 
     public static func stamp(of url: URL) -> CacheDB.FileStamp? {
@@ -543,7 +582,13 @@ public final class GraphStore {
     }
 
     public func updateConfig(_ transform: (inout GraphConfig) -> Void) throws {
+        let previous = config
         transform(&config)
-        try saveConfig()
+        do {
+            try saveConfig()
+        } catch {
+            config = previous
+            throw error
+        }
     }
 }

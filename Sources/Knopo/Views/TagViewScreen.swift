@@ -52,7 +52,7 @@ struct TagViewScreen: View {
                     VStack(alignment: .leading, spacing: 4) {
                         // Journal pages show their pretty date, not the raw
                         // ISO / Logseq filename form; navigation uses the key.
-                        Button(pageDisplayTitle(page)) {
+                        Button(app.displayTitle(for: page)) {
                             nav.navigate(to: .page(name: page))
                         }
                         .buttonStyle(.link)
@@ -91,6 +91,7 @@ struct TagViewScreen: View {
                             app?.store.resolveBlock(id)?.block.content
                         },
                         assetsDir: app.store.assetsDir,
+                        journalDateFormat: app.journalDateFormat,
                         tables: false // raw source in a snippet row (§5.2)
                     )
                 )))

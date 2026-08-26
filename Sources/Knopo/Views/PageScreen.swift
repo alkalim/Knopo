@@ -63,7 +63,8 @@ struct PageScreen: View {
         guard !lines.isEmpty else { return nil }
         let ctx = BlockRenderer.Context(
             resolveBlockRef: { app.store.resolveBlock($0)?.block.content },
-            assetsDir: app.store.assetsDir)
+            assetsDir: app.store.assetsDir,
+            journalDateFormat: app.journalDateFormat)
         // A `key:: value` line is a page property: render it dimmed as `key: value`
         // like block properties (§3.2), not as plain body text. Other preamble
         // lines (e.g. a leading `# Heading`) render as markdown.
@@ -90,7 +91,7 @@ struct PageScreen: View {
 
     private func header(_ doc: PageDocument) -> some View {
         HStack(spacing: 8) {
-            Text(doc.displayTitle)
+            Text(app.displayTitle(for: doc))
                 .font(.system(size: BlockRenderer.pageTitleFontSize, weight: .bold))
             if !doc.fileExists {
                 Text("stub")
@@ -166,7 +167,7 @@ struct BreadcrumbBar: View {
     var body: some View {
         let doc = app.document(for: pageName)
         HStack(spacing: 4) {
-            Button(doc.displayTitle) {
+            Button(app.displayTitle(for: doc)) {
                 nav.navigate(to: .page(name: pageName))
             }
             .buttonStyle(.link)

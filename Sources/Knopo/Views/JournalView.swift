@@ -39,7 +39,7 @@ struct JournalDaySection: View {
                 Button {
                     nav.navigate(to: .page(name: day))
                 } label: {
-                    Text(JournalDate(pageName: day)?.displayName ?? day)
+                    Text(app.displayTitle(for: day))
                         .font(.system(size: BlockRenderer.pageTitleFontSize, weight: .bold))
                 }
                 .buttonStyle(.plain)

@@ -23,6 +23,8 @@ enum BlockRenderer {
         /// override). Returns nil to fall back to the literal name. Date pages
         /// are handled without this — their title is a pure function.
         var pageDisplayTitle: ((String) -> String?)?
+        /// Journal-title format owned by the graph being rendered.
+        var journalDateFormat: JournalDateFormat
         /// Whether to draw faint `[[ ]]` around page references. Defaults to
         /// the user's stored preference so every render site honours it.
         var pageRefBrackets: Bool = BlockRenderer.bracketsEnabled
@@ -56,6 +58,7 @@ enum BlockRenderer {
              assetsDir: URL? = nil,
              inlineQuoteBar: Bool = true,
              pageDisplayTitle: ((String) -> String?)? = nil,
+             journalDateFormat: JournalDateFormat = .default,
              pageRefBrackets: Bool = BlockRenderer.bracketsEnabled,
              resolveEmbed: @escaping (EmbedTarget) -> NSAttributedString? = { _ in nil },
              resolveQuery: @escaping (QueryExpr) -> NSAttributedString? = { _ in nil },
@@ -67,6 +70,7 @@ enum BlockRenderer {
             self.assetsDir = assetsDir
             self.inlineQuoteBar = inlineQuoteBar
             self.pageDisplayTitle = pageDisplayTitle
+            self.journalDateFormat = journalDateFormat
             self.pageRefBrackets = pageRefBrackets
             self.resolveEmbed = resolveEmbed
             self.resolveQuery = resolveQuery
@@ -191,16 +195,16 @@ enum BlockRenderer {
     /// User preference: show faint `[[ ]]` brackets around page references.
     /// Per-app (a viewing/aesthetic choice), not per-graph data.
     static let pageRefBracketsKey = "showPageRefBrackets"
-    static var bracketsEnabled: Bool {
-        UserDefaults.standard.bool(forKey: pageRefBracketsKey)
-    }
+    static var bracketsEnabled = UserDefaults.standard.bool(forKey: pageRefBracketsKey)
 
     /// The text shown for a `[[name]]` reference: a date renders as its display
     /// title ("Jun 10th, 2026"), other pages use a `title::` override if the
     /// context supplies one, else the literal name. The link target is always
     /// the literal name (stable identity).
     static func pageRefDisplay(_ name: String, context: Context) -> String {
-        if let date = JournalDate(pageName: name) { return date.displayName }
+        if let date = JournalDate(pageName: name) {
+            return date.displayName(using: context.journalDateFormat)
+        }
         return context.pageDisplayTitle?(name) ?? name
     }
 
@@ -211,16 +215,14 @@ enum BlockRenderer {
     static let baseSize: CGFloat = 14
     static let minZoom: CGFloat = 0.6
     static let maxZoom: CGFloat = 2.6
-    private static let zoomKey = "contentZoom"
+    static let zoomKey = "contentZoom"
     /// Global content zoom (Cmd +/−/0), persisted per app. Scales the base font
     /// size — and thus everything derived from it (headings, code, TODO box,
     /// emoji, the editor) — across the main view and the right pane alike.
     static var zoom: CGFloat = {
         let saved = UserDefaults.standard.double(forKey: zoomKey)
         return saved <= 0 ? 1 : min(max(saved, minZoom), maxZoom)
-    }() {
-        didSet { UserDefaults.standard.set(zoom, forKey: zoomKey) }
-    }
+    }()
     /// Page-title size. The journal feed's day headings are page titles too — a
     /// day rendered in the feed and the same day opened on its own must not change
     /// size — so both take it from here.
@@ -337,7 +339,7 @@ enum BlockRenderer {
 
     static let minDensity: CGFloat = 0.5
     static let maxDensity: CGFloat = 2.0
-    private static let densityKey = "contentDensity"
+    static let densityKey = "contentDensity"
     /// Global text-density multiplier (View ▸ Increase/Decrease Line Spacing),
     /// persisted, in 10% steps. Scales vertical breathing room — the gap between
     /// wrapped lines *within* a block and the gap *between* blocks — without
@@ -345,10 +347,8 @@ enum BlockRenderer {
     static var density: CGFloat = {
         let saved = UserDefaults.standard.double(forKey: densityKey)
         return saved <= 0 ? 1 : min(max(saved, minDensity), maxDensity)
-    }() {
-        didSet { UserDefaults.standard.set(density, forKey: densityKey) }
-    }
-    /// Body-text font weight (View ▸ Font Weight). "Medium" is the app's
+    }()
+    /// Body-text font weight (General Settings). "Medium" is the app's
     /// original weight (`.regular`); light/heavy step around it. A per-app
     /// aesthetic choice (not per-graph data), persisted. Applied to body text
     /// in both the rendered rows and the focused editor so weight never shifts
@@ -384,9 +384,7 @@ enum BlockRenderer {
     static let contentWeightKey = "contentWeight"
     static var contentWeight: ContentWeight = {
         ContentWeight(rawValue: UserDefaults.standard.string(forKey: contentWeightKey) ?? "") ?? .medium
-    }() {
-        didSet { UserDefaults.standard.set(contentWeight.rawValue, forKey: contentWeightKey) }
-    }
+    }()
 
     /// SF `wght` OpenType variation axis identifier ('wght').
     private static let weightAxis = 0x77676874

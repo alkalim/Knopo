@@ -8,10 +8,16 @@ import KnopoCore
 @MainActor
 final class GraphManager: ObservableObject {
     private var apps: [String: AppState] = [:]   // canonical root path → graph
+    let preferences: Preferences
 
     private static let lastGraphKey = "lastGraphPath"
 
-    init() {
+    convenience init() {
+        self.init(preferences: .standard)
+    }
+
+    init(preferences: Preferences) {
+        self.preferences = preferences
         // Saves are debounced (§9.3), so quitting or switching away with a save
         // still pending would drop it: nothing else persists on the way out.
         // `flushPendingSaves` waits behind any write already on its queue.
@@ -36,7 +42,7 @@ final class GraphManager: ObservableObject {
     func acquire(_ root: URL) throws -> AppState {
         let key = root.standardizedFileURL.path
         if let existing = apps[key] { return existing }
-        let app = AppState(store: try Self.openStore(at: root))
+        let app = AppState(store: try openStore(at: root), preferences: preferences)
         apps[key] = app
         return app
     }
@@ -65,9 +71,15 @@ final class GraphManager: ObservableObject {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    private static func openStore(at root: URL) throws -> GraphStore {
+    private func openStore(at root: URL) throws -> GraphStore {
+        let hadConfig = FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(".knopo/config.json").path)
         let store = try GraphStore(root: root)
-        seedIfEmpty(store)
+        preferences.migrateThemeIfNeeded(from: store.config.theme)
+        if !hadConfig {
+            try store.updateConfig { $0.dateFormat = preferences.defaultDateFormat }
+        }
+        Self.seedIfEmpty(store)
         return store
     }
 
@@ -159,6 +171,7 @@ final class GraphHandle: ObservableObject {
 struct GraphActions {
     let app: AppState
     let openGraph: () -> Void
+    let openGraphSettings: () -> Void
 }
 
 /// The graph of the most recently activated window.
@@ -187,9 +200,13 @@ extension FocusedValues {
 
 @main
 struct KnopoApp: App {
-    @StateObject private var manager = GraphManager()
+    @StateObject private var preferences: Preferences
+    @StateObject private var manager: GraphManager
 
     init() {
+        let preferences = Preferences.standard
+        _preferences = StateObject(wrappedValue: preferences)
+        _manager = StateObject(wrappedValue: GraphManager(preferences: preferences))
         // KNOPO_BENCH=1: run the headless perf harness and exit (see Bench.swift).
         MainActor.assumeIsolated { Bench.runIfRequested() }
         // SPM executables aren't app bundles; make us a regular GUI app.
@@ -219,6 +236,11 @@ struct KnopoApp: App {
             GraphCommands()
             NavigationCommands()
         }
+
+        Settings {
+            GeneralSettingsView()
+                .environmentObject(preferences)
+        }
     }
 }
 
@@ -231,12 +253,6 @@ private struct GraphCommands: Commands {
     /// The focused window's graph, or the last activated one when SwiftUI reports
     /// no focus at all (see `ActiveGraph`).
     private var graph: GraphActions? { focusedGraph ?? activeGraph.actions }
-    /// Drives the Font Weight radio checkmark. Bound to the same UserDefaults
-    /// key the setting persists to, so selecting a weight (which writes that
-    /// key) re-renders this menu and moves the checkmark.
-    @AppStorage(BlockRenderer.contentWeightKey) private var contentWeightRaw =
-        BlockRenderer.ContentWeight.medium.rawValue
-
     var body: some Commands {
         CommandGroup(after: .newItem) {
             // SwiftUI's WindowGroup has no New Tab command. Create a new scene
@@ -255,6 +271,9 @@ private struct GraphCommands: Commands {
             Button("Open Graph…") { graph?.openGraph() }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(graph == nil)
+            Button("Graph Settings…") { graph?.openGraphSettings() }
+                .keyboardShortcut(",", modifiers: [.command, .option])
+                .disabled(graph == nil)
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") { graph?.app.undo() }
@@ -263,12 +282,6 @@ private struct GraphCommands: Commands {
                 .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(graph == nil)
         }
         CommandGroup(after: .toolbar) {
-            Toggle("Show Brackets Around Page Links", isOn: Binding(
-                get: { graph?.app.showPageRefBrackets ?? false },
-                set: { graph?.app.showPageRefBrackets = $0 }
-            ))
-            .disabled(graph == nil)
-            Divider()
             Button("Zoom In") { graph?.app.adjustZoom(by: 0.1) }
                 .keyboardShortcut("+", modifiers: .command).disabled(graph == nil)
             Button("Zoom Out") { graph?.app.adjustZoom(by: -0.1) }
@@ -284,32 +297,6 @@ private struct GraphCommands: Commands {
                 .keyboardShortcut("-", modifiers: [.command, .control]).disabled(graph == nil)
             Button("Reset Line Spacing") { graph?.app.resetDensity() }
                 .keyboardShortcut("0", modifiers: [.command, .control]).disabled(graph == nil)
-            Divider()
-            // Body-text font weight. Explicit checkmark buttons (not a Picker)
-            // because a menu-bar Picker caches its selection and won't re-sync
-            // its checkmark from the binding when the value changes; these
-            // buttons re-evaluate their label each time the menu opens.
-            Menu("Font Weight") {
-                ForEach(BlockRenderer.ContentWeight.allCases, id: \.self) { weight in
-                    Button {
-                        graph?.app.contentWeight = weight
-                    } label: {
-                        if contentWeightRaw == weight.rawValue {
-                            Label(weight.title, systemImage: "checkmark")
-                        } else {
-                            Text(weight.title)
-                        }
-                    }
-                }
-            }
-            .disabled(graph == nil)
-            Divider()
-            Button("Clear Recents") {
-                guard let app = graph?.app else { return }
-                try? app.store.cache.clearRecents()
-                app.dataVersion += 1
-            }
-            .disabled(graph == nil)
         }
     }
 }
@@ -335,6 +322,7 @@ private struct GraphView: View {
     @ObservedObject var app: AppState
     let openGraph: () -> Void
     @StateObject private var nav: Navigator
+    @State private var graphSettingsPresented = false
 
     init(app: AppState, openGraph: @escaping () -> Void) {
         self.app = app
@@ -343,30 +331,26 @@ private struct GraphView: View {
     }
 
     private var actions: GraphActions {
-        GraphActions(app: app, openGraph: openGraph)
+        GraphActions(
+            app: app,
+            openGraph: openGraph,
+            openGraphSettings: { graphSettingsPresented = true })
     }
 
     var body: some View {
-        MainWindow()
+        MainWindow(
+            graphName: app.store.root.lastPathComponent,
+            openGraphSettings: { graphSettingsPresented = true })
             .environmentObject(app)
             .environmentObject(nav)
-            .preferredColorScheme(colorScheme)
             .focusedSceneValue(\.navigator, nav)
             .focusedSceneValue(\.graphActions, actions)
-            // Title bar shows the graph; the per-tab label shows the page
-            // (set on the window's tab independently — see WindowConfigurator).
-            .navigationTitle(app.store.root.lastPathComponent)
             .background(WindowConfigurator(
                 onActivate: { ActiveGraph.shared.actions = actions },
                 graphName: app.store.root.lastPathComponent, pageTitle: currentTitle))
-    }
-
-    private var colorScheme: ColorScheme? {
-        switch app.store.config.theme {
-        case "light": return .light
-        case "dark": return .dark
-        default: return nil
-        }
+            .sheet(isPresented: $graphSettingsPresented) {
+                GraphSettingsView(app: app)
+            }
     }
 
     /// The current page/section — used as the window tab's label.
@@ -375,14 +359,14 @@ private struct GraphView: View {
         case .journalHome: return "Journal"
         case .allPages: return "All Pages"
         case .tag(let tag): return "#\(tag)"
-        case .page(let name, _): return app.document(for: name).displayTitle
+        case .page(let name, _): return app.displayTitle(for: app.document(for: name))
         }
     }
 }
 
 /// Reaches the hosting NSWindow to (a) persist its frame across launches and
-/// (b) label the window's *tab* with the current page, while the title bar
-/// keeps the graph name (`navigationTitle`).
+/// (b) label the window's *tab* with the current page. The visible graph title
+/// is a leading toolbar item so it can reveal the Graph Settings gear.
 ///
 /// We persist the frame ourselves under a stable key rather than relying on
 /// SwiftUI's automatic autosave: that key is derived from the (private, nested)
@@ -402,7 +386,7 @@ private struct WindowConfigurator: NSViewRepresentable {
     /// Called when this window becomes key (and once when it is first set up), so
     /// menu commands can target the graph you're actually working in.
     let onActivate: () -> Void
-    let graphName: String   // == window.title (set by navigationTitle)
+    let graphName: String
     let pageTitle: String
     private static let frameKey = "KnopoMainWindowFrame"
     /// Posted when a window's graph/page changes or a window closes, so every
@@ -433,13 +417,12 @@ private struct WindowConfigurator: NSViewRepresentable {
 
         /// The tab label is just the page — unless this window's tab group mixes
         /// graphs, in which case prepend the graph name so tabs from different
-        /// graphs ("Journal | Journal") are distinguishable. Sibling graphs are
-        /// read from each window's title (set by `navigationTitle`).
+        /// graphs ("Journal | Journal") are distinguishable.
         func refreshTabTitle() {
             guard let window else { return }
             let siblings = window.tabGroup?.windows ?? [window]
-            // Read the graph name live from the window title (set by
-            // navigationTitle) rather than the captured `graphName`: on a graph
+            // Read the graph name live from the window title rather than the
+            // captured `graphName`: on a graph
             // switch this coordinator may be a lingering stale one, but the
             // window itself is stable and already carries the current graph.
             let graph = window.title
@@ -463,11 +446,11 @@ private struct WindowConfigurator: NSViewRepresentable {
         let changed = c.graphName != graphName || c.pageTitle != pageTitle
         c.graphName = graphName
         c.pageTitle = pageTitle
-        // Defer so it runs after SwiftUI applies navigationTitle (which sets the
-        // window title we read to detect mixed-graph tab groups, and would
-        // otherwise reset the tab label).
+        // Defer until SwiftUI has attached the representable to its window.
         DispatchQueue.main.async {
             configure(nsView.window, c)
+            nsView.window?.title = graphName
+            nsView.window?.titleVisibility = .hidden
             c.refreshTabTitle()
             // Our change may flip a sibling tab's mixed state too.
             if changed { NotificationCenter.default.post(name: Self.windowsChanged, object: nil) }
@@ -481,6 +464,8 @@ private struct WindowConfigurator: NSViewRepresentable {
         guard let window, !coordinator.configured else { return }
         coordinator.configured = true
         coordinator.window = window
+        window.title = graphName
+        window.titleVisibility = .hidden
         window.minSize = NSSize(width: 900, height: 560)
         // Native tabs: new scenes merge into one tab group, so `Cmd+T` ("New
         // Tab") works and tabs are available regardless of the system "prefer

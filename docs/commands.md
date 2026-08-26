@@ -122,6 +122,8 @@ parent is the moving unit and carries its subtree.
 | `⌘J` | Go to today: opens the journal home and puts the caret in today's last block, ready to type — from another page, or from another day in the feed. It never navigates away from the journal, so repeat presses don't bounce between views. Click a day's heading to open that day's own page. |
 | `⌘[` / `⌘]` | Go back or forward in navigation history. |
 | `⌘O` | Choose or create a graph folder for the focused window. |
+| `⌘,` | Open app-wide General settings. |
+| `⌥⌘,` | Open settings for the focused window's graph. |
 | `⌘T` | Open a new native tab using the last-used graph. |
 | `⌘N` | Open a new window using the last-used graph. |
 | `⌘Enter` in Search | Open the highlighted search result in the right sidebar. |
@@ -144,8 +146,8 @@ in the main view.
 | `⌃⌘-` | Decrease line spacing. |
 | `⌃⌘0` | Reset line spacing. |
 
-The View menu also controls page-link brackets, content font weight, and clearing
-recent pages.
+Body font weight and page-link brackets live in General settings. Rebuilding
+the index lives in Graph Settings.
 
 ## Pointer and context-menu actions
 

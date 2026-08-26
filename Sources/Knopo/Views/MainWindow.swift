@@ -4,6 +4,8 @@ import KnopoCore
 struct MainWindow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var nav: Navigator
+    let graphName: String
+    let openGraphSettings: () -> Void
 
     /// User-set right-sidebar width as a fraction (0–1) of the detail area. Nil
     /// until the divider is dragged (or a saved fraction is restored) — until
@@ -70,6 +72,18 @@ struct MainWindow: View {
                     backTitles: backTitles, forwardTitles: forwardTitles,
                     goBack: { nav.goBack(steps: $0) },
                     goForward: { nav.goForward(steps: $0) })
+            }
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .navigation) {
+                    GraphTitleSettingsControl(
+                        graphName: graphName, openSettings: openGraphSettings)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .navigation) {
+                    GraphTitleSettingsControl(
+                        graphName: graphName, openSettings: openGraphSettings)
+                }
             }
         }
         .sheet(isPresented: $nav.searchPresented) {
@@ -150,6 +164,34 @@ struct MainWindow: View {
         case .allPages:
             AllPagesView()
         }
+    }
+}
+
+private struct GraphTitleSettingsControl: View {
+    let graphName: String
+    let openSettings: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Text(graphName)
+            .font(.title3.weight(.semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            .padding(.trailing, 22)
+            .overlay(alignment: .trailing) {
+                Button(action: openSettings) {
+                    Image(systemName: "gearshape")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Graph Settings")
+                .opacity(hovered ? 1 : 0)
+                .allowsHitTesting(hovered)
+                .accessibilityLabel("Graph Settings for \(graphName)")
+            }
+            .contentShape(Rectangle())
+            .onHover { hovered = $0 }
     }
 }
 

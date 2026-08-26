@@ -117,7 +117,7 @@ There is no tag entity to open as a document, no tag content, no tag properties.
 - Relative image sources (`![alt](src)`) resolve against `assets/`. Knopo *emits* the `../assets/<file>` form — relative to the page file, which is how Logseq, GitHub, and Obsidian resolve it — so pages stay portable; both forms are read. Imported filenames replace spaces with `_` (CommonMark forbids spaces in a link destination); name collisions use readable `-1`, `-2`, … suffixes; deleting a block does not delete its asset (there is no asset garbage collection in v1).
 - `cache.db` holds the block/reference/tag index and recent-pages list. It is a **cache**: deleting it loses nothing except recents; the app rebuilds it from the Markdown files on next start — delete its `-wal`/`-shm` companions along with it.
 - The index is opened in **WAL** mode, so a reference lookup or search never waits for the debounced reindex of the page you are typing in. WAL needs a shared-memory file that network filesystems (SMB, NFS) do not provide; on one, the index falls back to a single serialized connection, where a read can wait out a running write. Graphs stay openable either way, and note files are unaffected — they are written directly, not through SQLite.
-- `config.json` holds favourites and user settings. It is authoritative (not rebuildable) and should be committed/backed up along with pages.
+- `config.json` holds favourites and per-graph settings. It is authoritative (not rebuildable) and should be committed/backed up along with pages. App-wide appearance preferences live in `UserDefaults` instead.
 
 ### 4.2 File format
 
@@ -434,7 +434,7 @@ The reference index updates with the page (same cadence) and on external file ch
 
 - The sidebar's **Recents** section lists the last 20 distinct pages opened (navigations to a page or zoom into its blocks; sidebar previews don't count).
 - Most recent first; visiting a listed page moves it to the top; favouriting does not remove it from recents.
-- Stored in `cache.db` (acceptable to lose). Cleared via a "Clear recents" menu item.
+- Stored in `cache.db` (acceptable to lose).
 
 ---
 
@@ -444,6 +444,7 @@ The reference index updates with the page (same cadence) and on external file ch
 - **Right sidebar**: stack of panes opened via `Cmd+Click` (or `Shift+Click`) on any page/block reference or sidebar entry; each pane closable; resizable divider; used for side-by-side reference work. The open panes and the dragged divider width are persisted per graph in `config.json`, so a graph reopens with its right sidebar as left. Resizing the window scales the main view and the panel proportionally (their ratio holds); once the main view is at its minimum useable width, further narrowing shrinks only the panel.
 - **Windows**: each **window** shows one graph; different windows may show **different** graphs (e.g. a roadmap graph beside a work graph). A new window (`Cmd+N`) opens the last-used graph. Any windows showing the **same** graph share its data, undo stack, and index (the store is opened once per folder, never double-opened), while each keeps its own current page, navigation history, and right-sidebar panes.
 - **Open Graph (`Cmd+O`)**: pick or create a graph folder; it opens in (switches) the **focused window only**, leaving other windows on their graphs. The last graph opened is reopened on next launch. Precedence at launch: `KNOPO_GRAPH` env var → last opened → `~/Documents/Knopo`.
+- **Graph Settings (`Option+Cmd+,`)**: opens a sheet owned by the focused graph window. The same sheet is available from the gear revealed when the graph title is hovered.
 - **Search (`Cmd+K`)**: single dialog combining fuzzy page-name match (top section) and full-text block search (below), with `Enter` to navigate and `Cmd+Enter` to open in right sidebar. Full-text index lives in `cache.db`. Block search is FTS5 **token-prefix** matching, so `log` matches `log`, `logsize`, `logging` (token starts) but not `catalog` (mid-word) — unlike `Cmd+F`'s substring match. The dialog is a fixed size (it does not resize as results change).
 - **Find in page (`Cmd+F`)**: a find bar scoped to the current view's outline(s) — matches the rendered (visible) text, highlights all matches with the current one emphasized, shows "n of m", and steps with `Cmd+G` / `Shift+Cmd+G`. On the journal home it spans all currently-rendered days. (Distinct from `Cmd+K`, which searches the whole graph via the index.)
 - **Breadcrumbs** when zoomed into a block: `Page › parent › parent`, each segment clickable.
@@ -523,3 +524,22 @@ Scope filters (`in-page` / `descendant-of`), journal-date ranges, output control
 
 - **Index completeness.** The `cache.db` block index stores, per block, everything a query filters on: page references, block references, tags, block properties (`key:: value`), the `TODO`/`DONE` keyword state, and the containing page's name and journal date.
 - **Tag model unaffected.** Tags remain labels (§8). Queries are the mechanism for tag intersections, tag + page-ref combinations, and (later) date-range filters — which is why none of those warrant page-like tag semantics.
+
+---
+
+## 18. Settings
+
+Settings have two ownership tiers and apply immediately:
+
+| Surface | Setting | Default / behavior |
+|---|---|---|
+| General (`Cmd+,`) | Theme | Follow the system; light and dark overrides are app-wide. A legacy per-graph theme is imported once. |
+| General | Body font weight | Medium; Light and Heavy are app-wide alternatives. |
+| General | Page-link brackets | Hidden. |
+| General | Default journal date format | `Jun 10th, 2026`; copied when a folder without an existing `.knopo/config.json` is first opened. |
+| Graph Settings (`Option+Cmd+,`) | Journal date format | Stored in `.knopo/config.json`; presets and a custom Unicode pattern are supported. `d{ordinal}` is Knopo's English ordinal extension. |
+| Graph Settings | Search index | Shows stable logical size and can rebuild `cache.db` from Markdown without clearing recents. |
+
+Zoom and line spacing remain View-menu actions (`Cmd +/-/0` and
+`Control+Cmd =/-/0`) rather than Settings fields. AI settings, preferences sync,
+custom fonts, accent colours, and additional themes are out of scope.

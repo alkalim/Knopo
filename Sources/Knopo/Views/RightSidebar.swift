@@ -181,7 +181,7 @@ struct RightSidebar: View {
     private func paneTitle(_ target: NavTarget) -> String {
         switch target {
         case .page(let name, _):
-            return JournalDate(pageName: name)?.displayName ?? name
+            return app.displayTitle(for: name)
         case .tag(let tag): return "#\(tag)"
         case .journalHome: return "Journal"
         case .allPages: return "All Pages"

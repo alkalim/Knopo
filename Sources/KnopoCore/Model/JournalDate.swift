@@ -74,9 +74,11 @@ public struct JournalDate: Equatable, Hashable, Comparable, Sendable {
 
     /// Default display format: `Jun 10th, 2026`.
     public var displayName: String {
-        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        return "\(months[month - 1]) \(day)\(Self.ordinalSuffix(day)), \(year)"
+        displayName(using: .default)
+    }
+
+    public func displayName(using format: JournalDateFormat) -> String {
+        format.string(from: self)
     }
 
     public static func ordinalSuffix(_ n: Int) -> String {

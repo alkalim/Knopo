@@ -259,7 +259,6 @@ struct Sidebar: View {
     }
 
     private func displayName(for name: String) -> String {
-        if let date = JournalDate(pageName: name) { return date.displayName }
-        return name
+        app.displayTitle(for: name)
     }
 }

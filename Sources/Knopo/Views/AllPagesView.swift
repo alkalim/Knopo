@@ -31,7 +31,7 @@ struct AllPagesView: View {
         let _ = app.dataVersion
         let pages = app.allPages().filter {
             filter.isEmpty
-                || fuzzyMatch(query: filter, in: pageDisplayTitle($0.displayName))
+                || fuzzyMatch(query: filter, in: app.displayTitle(for: $0.displayName))
                 || fuzzyMatch(query: filter, in: $0.displayName)
         }
         let journals = pages.filter(\.isJournal).sorted {
@@ -103,7 +103,7 @@ struct AllPagesView: View {
             HStack {
                 Image(systemName: listing.isJournal ? "calendar" : "doc.text")
                     .foregroundStyle(.secondary)
-                Text(pageDisplayTitle(listing.displayName))
+                Text(app.displayTitle(for: listing.displayName))
                 if !listing.fileExists {
                     Text("stub").font(.caption2).foregroundStyle(.tertiary)
                 }
