@@ -56,27 +56,17 @@ final class Preferences: ObservableObject {
         }
     }
 
-    @Published var zoom: CGFloat {
-        didSet {
-            let clamped = min(max(zoom, BlockRenderer.minZoom), BlockRenderer.maxZoom)
-            if clamped != zoom { zoom = clamped; return }
-            guard zoom != oldValue else { return }
-            defaults.set(Double(zoom), forKey: BlockRenderer.zoomKey)
-            if syncsRenderer { BlockRenderer.zoom = zoom }
-            renderRevision += 1
-        }
+    var zoom: CGFloat {
+        get { zoomValue }
+        set { setZoom(newValue) }
     }
+    @Published private var zoomValue: CGFloat
 
-    @Published var density: CGFloat {
-        didSet {
-            let clamped = min(max(density, BlockRenderer.minDensity), BlockRenderer.maxDensity)
-            if clamped != density { density = clamped; return }
-            guard density != oldValue else { return }
-            defaults.set(Double(density), forKey: BlockRenderer.densityKey)
-            if syncsRenderer { BlockRenderer.density = density }
-            renderRevision += 1
-        }
+    var density: CGFloat {
+        get { densityValue }
+        set { setDensity(newValue) }
     }
+    @Published private var densityValue: CGFloat
 
     /// Bumped for preferences that require cached attributed strings and row
     /// measurements to be rebuilt in every open graph.
@@ -99,10 +89,10 @@ final class Preferences: ObservableObject {
         }
 
         let savedZoom = CGFloat(defaults.double(forKey: BlockRenderer.zoomKey))
-        zoom = savedZoom > 0
+        zoomValue = savedZoom > 0
             ? min(max(savedZoom, BlockRenderer.minZoom), BlockRenderer.maxZoom) : 1
         let savedDensity = CGFloat(defaults.double(forKey: BlockRenderer.densityKey))
-        density = savedDensity > 0
+        densityValue = savedDensity > 0
             ? min(max(savedDensity, BlockRenderer.minDensity), BlockRenderer.maxDensity) : 1
 
         if syncsRenderer {
@@ -123,6 +113,24 @@ final class Preferences: ObservableObject {
         // persistence path, so mark even that migration as complete explicitly.
         defaults.set(theme.rawValue, forKey: Self.themeKey)
         themeWasSet = true
+    }
+
+    private func setZoom(_ proposed: CGFloat) {
+        let value = min(max(proposed, BlockRenderer.minZoom), BlockRenderer.maxZoom)
+        guard value != zoomValue else { return }
+        zoomValue = value
+        defaults.set(Double(value), forKey: BlockRenderer.zoomKey)
+        if syncsRenderer { BlockRenderer.zoom = value }
+        renderRevision += 1
+    }
+
+    private func setDensity(_ proposed: CGFloat) {
+        let value = min(max(proposed, BlockRenderer.minDensity), BlockRenderer.maxDensity)
+        guard value != densityValue else { return }
+        densityValue = value
+        defaults.set(Double(value), forKey: BlockRenderer.densityKey)
+        if syncsRenderer { BlockRenderer.density = value }
+        renderRevision += 1
     }
 
     private static func apply(_ theme: Theme) {

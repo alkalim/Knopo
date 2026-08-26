@@ -37,8 +37,22 @@ import Testing
         expectNil(JournalDateFormat(validating: "d{ordinal}{ordinal}"))
         expectNil(JournalDateFormat(validating: "yyyy {unknown}"))
         expectNil(JournalDateFormat(validating: "MMM d 'unfinished"))
+        expectNil(JournalDateFormat(validating: "MMM d, yyyy \u{F8FF}"))
         expectNotNil(JournalDateFormat(validating: "yyyy/MM/dd"))
         expectNotNil(JournalDateFormat(validating: "MMM d{ordinal}, yyyy"))
+    }
+
+    @Test func cachedFormattersAreSafeAcrossTasks() async {
+        let format = JournalDateFormat(pattern: "EEEE, MMMM d{ordinal}, yyyy")
+        let values = await withTaskGroup(of: String.self, returning: [String].self) { group in
+            for _ in 0..<200 {
+                group.addTask { format.string(from: sample) }
+            }
+            var values: [String] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        expectEqual(Set(values), ["Wednesday, June 10th, 2026"])
     }
 
     @Test func legacyPatternNormalizesAndCodableStaysAString() throws {

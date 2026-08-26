@@ -58,7 +58,7 @@ enum BlockRenderer {
              assetsDir: URL? = nil,
              inlineQuoteBar: Bool = true,
              pageDisplayTitle: ((String) -> String?)? = nil,
-             journalDateFormat: JournalDateFormat = .default,
+             journalDateFormat: JournalDateFormat,
              pageRefBrackets: Bool = BlockRenderer.bracketsEnabled,
              resolveEmbed: @escaping (EmbedTarget) -> NSAttributedString? = { _ in nil },
              resolveQuery: @escaping (QueryExpr) -> NSAttributedString? = { _ in nil },

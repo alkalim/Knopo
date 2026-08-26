@@ -370,19 +370,29 @@ import Foundation
         let d = JournalDate(pageName: "2026-06-10")
         expectNotNil(d)
         expectEqual(d?.pageName, "2026-06-10")
-        expectEqual(d?.displayName, "Jun 10th, 2026")
+        expectEqual(d?.displayName(using: .default), "Jun 10th, 2026")
         expectNil(JournalDate(pageName: "2026-13-01"))
         expectNil(JournalDate(pageName: "not-a-date"))
         expectNil(JournalDate(pageName: "2026-6-1"))
-        expectEqual(JournalDate(pageName: "2026-06-01")!.displayName, "Jun 1st, 2026")
-        expectEqual(JournalDate(pageName: "2026-06-02")!.displayName, "Jun 2nd, 2026")
-        expectEqual(JournalDate(pageName: "2026-06-03")!.displayName, "Jun 3rd, 2026")
-        expectEqual(JournalDate(pageName: "2026-06-11")!.displayName, "Jun 11th, 2026")
+        expectEqual(
+            JournalDate(pageName: "2026-06-01")!.displayName(using: .default),
+            "Jun 1st, 2026")
+        expectEqual(
+            JournalDate(pageName: "2026-06-02")!.displayName(using: .default),
+            "Jun 2nd, 2026")
+        expectEqual(
+            JournalDate(pageName: "2026-06-03")!.displayName(using: .default),
+            "Jun 3rd, 2026")
+        expectEqual(
+            JournalDate(pageName: "2026-06-11")!.displayName(using: .default),
+            "Jun 11th, 2026")
         expectEqual(JournalDate(pageName: "2026-06-10")!.adding(days: 1).pageName, "2026-06-11")
         expectEqual(JournalDate(pageName: "2026-01-01")!.adding(days: -1).pageName, "2025-12-31")
         // Logseq's underscore filename form parses to the same date.
         expectEqual(JournalDate(pageName: "2024_04_30")?.pageName, "2024-04-30")
-        expectEqual(JournalDate(pageName: "2024_04_30")?.displayName, "Apr 30th, 2024")
+        expectEqual(
+            JournalDate(pageName: "2024_04_30")?.displayName(using: .default),
+            "Apr 30th, 2024")
         expectNil(JournalDate(pageName: "2024_13_01"))
         expectNil(JournalDate(pageName: "not_a_date"))
     }

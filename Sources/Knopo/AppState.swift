@@ -497,11 +497,12 @@ final class AppState: ObservableObject {
         closePendingEdit?()
         flushPendingSaves()
         let maintenance = store.indexMaintenance
-        try await withCheckedThrowingContinuation { continuation in
+        let onDisk = try await withCheckedThrowingContinuation { continuation in
             pageSaveQueue.async {
                 continuation.resume(with: Result { try maintenance.rebuild() })
             }
         }
+        store.pruneStaleFavourites(onDisk: onDisk)
         dataVersion += 1
     }
 

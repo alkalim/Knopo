@@ -40,7 +40,7 @@ import Foundation
 
         let loaded = GraphConfig.load(from: url)
         expectEqual(loaded.favourites, ["Home"])
-        expectEqual(loaded.theme, "dark")
+        expectEqual(loaded.legacyTheme, "dark")
         expectEqual(loaded.dateFormat, .default)
         expectTrue(loaded.rightPanes.isEmpty)
         expectTrue(loaded.rightPaneFraction == nil)
@@ -61,7 +61,7 @@ import Foundation
 
         let loaded = GraphConfig.load(from: input)
         expectEqual(loaded.dateFormat, .default)
-        expectEqual(loaded.theme, "dark")
+        expectEqual(loaded.legacyTheme, "dark")
         try loaded.save(to: output)
         let saved = try String(contentsOf: output, encoding: .utf8)
         expectTrue(saved.contains("MMM d{ordinal}, yyyy"))
@@ -77,5 +77,17 @@ import Foundation
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         try Data(json.utf8).write(to: url)
         expectEqual(GraphConfig.load(from: url).dateFormat, .default)
+    }
+
+    @Test func encoderCoversEveryNonlegacyConfigKey() throws {
+        var config = GraphConfig()
+        config.rightPaneFraction = 0.4 // ensure the sole optional key is emitted
+        let data = try JSONEncoder().encode(config)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let expected = Set(GraphConfig.CodingKeys.allCases)
+            .subtracting(GraphConfig.legacyOnlyCodingKeys)
+            .map(\.rawValue)
+        expectEqual(Set(object.keys), Set(expected))
     }
 }

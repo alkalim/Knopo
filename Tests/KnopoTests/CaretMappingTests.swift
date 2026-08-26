@@ -11,7 +11,9 @@ import KnopoCore
 @Suite struct CaretMappingTests {
 
     private func render(_ content: String) -> NSAttributedString {
-        BlockRenderer.render(content: content, context: BlockRenderer.Context())
+        BlockRenderer.render(
+            content: content,
+            context: BlockRenderer.Context(journalDateFormat: .default))
     }
 
     /// Source offset for the rendered index of `needle`'s first character.

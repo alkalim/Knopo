@@ -12,7 +12,7 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     public var dateFormat: JournalDateFormat = .default
     /// Legacy per-graph appearance value. Decoded for the one-time migration to
     /// app preferences, but deliberately no longer encoded.
-    public var theme: String = "system"
+    public var legacyTheme: String = "system"
     /// Right-sidebar layout (SPEC §12), persisted so a graph reopens as left.
     /// Encoded `NavTarget`s for the open panes (newest first); the app layer
     /// owns the encoding — the config just stores the opaque strings.
@@ -26,10 +26,13 @@ public struct GraphConfig: Codable, Equatable, Sendable {
 
     public init() {}
 
-    private enum CodingKeys: String, CodingKey {
-        case favourites, favouriteTags, dateFormat, theme, rightPanes, rightPaneFraction
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case favourites, favouriteTags, dateFormat, rightPanes, rightPaneFraction
         case allPagesCollapsedSections
+        case legacyTheme = "theme"
     }
+
+    static let legacyOnlyCodingKeys: Set<CodingKeys> = [.legacyTheme]
 
     // Decode field-by-field so older config files (predating a field) still
     // load with defaults instead of failing the whole decode.
@@ -43,7 +46,7 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         } else {
             dateFormat = .default
         }
-        theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
+        legacyTheme = try c.decodeIfPresent(String.self, forKey: .legacyTheme) ?? "system"
         rightPanes = try c.decodeIfPresent([String].self, forKey: .rightPanes) ?? []
         rightPaneFraction = try c.decodeIfPresent(Double.self, forKey: .rightPaneFraction)
         allPagesCollapsedSections =

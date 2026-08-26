@@ -30,20 +30,17 @@ public final class GraphStore {
             self.cache = cache
         }
 
-        public func rebuild() throws {
-            try cache.clearAll() // deliberately preserves graph recents
-            for (url, name, _, isJournal) in GraphStore.resolvedFiles(at: root) {
-                guard let stamp = GraphStore.stamp(of: url) else { continue }
-                try cache.indexPage(
-                    GraphStore.read(url: url, name: name, isJournal: isJournal),
-                    stamp: stamp)
-            }
+        @discardableResult
+        public func rebuild() throws -> Set<String> {
+            let onDisk = try GraphStore.synchronizeIndexFiles(
+                at: root, cache: cache, force: true)
             try cache.setIndexVersion(CacheDB.indexVersion)
+            return onDisk
         }
 
         /// Logical SQLite database size. Unlike filesystem allocation for the
         /// WAL/SHM sidecars, this is stable across equivalent rebuilds.
-        public func sizeOnDisk() -> Int64 {
+        public func sizeOnDisk() -> Int64? {
             cache.logicalSize()
         }
     }
@@ -80,8 +77,9 @@ public final class GraphStore {
         ) throws -> CacheDB.FileStamp? {
             var doc = snapshot.document
             let text = PageSerializer.serialize(preamble: doc.preamble, blocks: doc.blocks)
-            let directory = doc.isJournal ? "journals" : "pages"
-            let url = root.appendingPathComponent(directory, isDirectory: true)
+            let directory = doc.isJournal
+                ? GraphStore.journalsDir(at: root) : GraphStore.pagesDir(at: root)
+            let url = directory
                 .appendingPathComponent(PageName.fileName(for: doc.name))
             let data = Data(text.utf8)
             let digest = SHA256.hash(data: data)
@@ -126,8 +124,8 @@ public final class GraphStore {
     /// Called after pages change on disk behind the app's back (external edits).
     public var onExternalChange: ((Set<String>) -> Void)?
 
-    public var pagesDir: URL { root.appendingPathComponent("pages", isDirectory: true) }
-    public var journalsDir: URL { root.appendingPathComponent("journals", isDirectory: true) }
+    public var pagesDir: URL { Self.pagesDir(at: root) }
+    public var journalsDir: URL { Self.journalsDir(at: root) }
     public var dotDir: URL { root.appendingPathComponent(".knopo", isDirectory: true) }
     public var assetsDir: URL { root.appendingPathComponent("assets", isDirectory: true) }
     public var configURL: URL { dotDir.appendingPathComponent("config.json") }
@@ -139,8 +137,8 @@ public final class GraphStore {
     public init(root: URL) throws {
         self.root = root
         let fm = FileManager.default
-        for dir in [root.appendingPathComponent("pages"), root.appendingPathComponent("journals"),
-                    root.appendingPathComponent(".knopo")] {
+        for dir in [Self.pagesDir(at: root), Self.journalsDir(at: root),
+                    root.appendingPathComponent(".knopo", isDirectory: true)] {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         let cache = try CacheDB(url: root.appendingPathComponent(".knopo/cache.db"))
@@ -161,10 +159,31 @@ public final class GraphStore {
     /// With an intact cache this touches no file contents — the <3s cold-start
     /// path (SPEC §14).
     public func synchronizeIndex(force: Bool = false) throws {
+        let onDisk = try Self.synchronizeIndexFiles(at: root, cache: cache, force: force)
+        pruneStaleFavourites(onDisk: onDisk)
+    }
+
+    /// Removes favourites whose files disappeared. Rebuild runs its file walk
+    /// off the main actor and then calls this config-owning part on AppState.
+    public func pruneStaleFavourites(onDisk: Set<String>) {
+        // A favourite may point at a journal stub (today), so only drop ones
+        // that are neither on disk nor valid journal dates.
+        let before = config.favourites
+        config.favourites.removeAll { name in
+            !onDisk.contains(PageName.key(name)) && JournalDate(pageName: name) == nil
+        }
+        if config.favourites != before { try? saveConfig() }
+    }
+
+    /// Shared file synchronization for startup, external force-sync, and the
+    /// user-triggered rebuild. Returns the on-disk keys for config cleanup.
+    private static func synchronizeIndexFiles(
+        at root: URL, cache: CacheDB, force: Bool
+    ) throws -> Set<String> {
         if force { try cache.clearAll() }
         let known = force ? [:] : try cache.fileStamps()
         var onDisk = Set<String>()
-        for (url, name, key, isJournal) in resolvedFiles() {
+        for (url, name, key, isJournal) in resolvedFiles(at: root) {
             onDisk.insert(key)
             guard let stamp = Self.stamp(of: url) else { continue }
             if !force, known[key] == stamp { continue }
@@ -174,14 +193,15 @@ public final class GraphStore {
         for listing in try cache.allPages() where !onDisk.contains(listing.nameKey) {
             try cache.removePage(key: listing.nameKey)
         }
-        // Favourites whose page is gone are removed (SPEC §11.1) — but a
-        // favourite may point at a journal stub (today), so only drop ones
-        // that are neither on disk nor valid journal dates.
-        let before = config.favourites
-        config.favourites.removeAll { name in
-            !onDisk.contains(PageName.key(name)) && JournalDate(pageName: name) == nil
-        }
-        if config.favourites != before { try? saveConfig() }
+        return onDisk
+    }
+
+    private static func pagesDir(at root: URL) -> URL {
+        root.appendingPathComponent("pages", isDirectory: true)
+    }
+
+    private static func journalsDir(at root: URL) -> URL {
+        root.appendingPathComponent("journals", isDirectory: true)
     }
 
     private static func pageFiles(at root: URL) -> [(url: URL, isJournal: Bool)] {
@@ -191,8 +211,8 @@ public final class GraphStore {
                 .filter { $0.pathExtension.lowercased() == "md" }
                 .map { ($0, journal) }
         }
-        return list(root.appendingPathComponent("pages", isDirectory: true), journal: false)
-            + list(root.appendingPathComponent("journals", isDirectory: true), journal: true)
+        return list(pagesDir(at: root), journal: false)
+            + list(journalsDir(at: root), journal: true)
     }
 
     /// `pageFiles()` with journal identity resolved. `PageName.key` already folds
@@ -222,10 +242,6 @@ public final class GraphStore {
             }
         }
         return regular + journals.map { (key, j) in (j.url, j.name, key, true) }
-    }
-
-    private func resolvedFiles() -> [(url: URL, name: String, key: String, isJournal: Bool)] {
-        Self.resolvedFiles(at: root)
     }
 
     public static func stamp(of url: URL) -> CacheDB.FileStamp? {
@@ -536,7 +552,7 @@ public final class GraphStore {
         var affected = Set<String>()
         var onDisk = Set<String>()
         let knownStamps = try cache.fileStamps()
-        for (url, name, key, isJournal) in resolvedFiles() {
+        for (url, name, key, isJournal) in Self.resolvedFiles(at: root) {
             onDisk.insert(key)
             guard let stamp = Self.stamp(of: url) else { continue }
             if knownStamps[key] == stamp { continue }

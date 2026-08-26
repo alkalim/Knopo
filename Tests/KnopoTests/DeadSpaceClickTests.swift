@@ -10,7 +10,9 @@ import KnopoCore
 @Suite struct DeadSpaceClickTests {
 
     private func render(_ content: String) -> NSAttributedString {
-        BlockRenderer.render(content: content, context: BlockRenderer.Context())
+        BlockRenderer.render(
+            content: content,
+            context: BlockRenderer.Context(journalDateFormat: .default))
     }
 
     /// A click in the gutter or the row's padding lands outside the text, and has

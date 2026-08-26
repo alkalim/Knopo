@@ -72,11 +72,6 @@ public struct JournalDate: Equatable, Hashable, Comparable, Sendable {
         String(format: "%04d-%02d-%02d", year, month, day)
     }
 
-    /// Default display format: `Jun 10th, 2026`.
-    public var displayName: String {
-        displayName(using: .default)
-    }
-
     public func displayName(using format: JournalDateFormat) -> String {
         format.string(from: self)
     }

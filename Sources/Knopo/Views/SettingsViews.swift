@@ -1,11 +1,15 @@
 import SwiftUI
 import KnopoCore
 
+private enum SettingsLayout {
+    static let width: CGFloat = 520
+    static let height: CGFloat = 430
+}
+
 struct GeneralSettingsView: View {
     @EnvironmentObject private var preferences: Preferences
 
     var body: some View {
-        let _ = preferences.renderRevision
         Form {
             Section("Appearance") {
                 Picker("Theme", selection: $preferences.theme) {
@@ -40,7 +44,7 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 430)
+        .frame(width: SettingsLayout.width, height: SettingsLayout.height)
         .navigationTitle("Settings")
     }
 
@@ -48,7 +52,7 @@ struct GeneralSettingsView: View {
         let rendered = BlockRenderer.render(
             content: "A [[linked page]] with **bold text** and #notes",
             context: BlockRenderer.Context(
-                pageRefBrackets: preferences.showPageRefBrackets,
+                journalDateFormat: .default,
                 tables: false))
         return Text(AttributedString(rendered))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -68,7 +72,7 @@ struct GraphSettingsView: View {
     @ObservedObject var app: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var cacheSize: Int64 = 0
+    @State private var cacheSize: Int64?
     @State private var rebuilding = false
     @State private var errorMessage: String?
 
@@ -76,50 +80,64 @@ struct GraphSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Journals") {
-                    JournalDateFormatControl(
-                        title: "Date format",
-                        format: app.journalDateFormat,
-                        explanation: "Used to display journal titles in \(graphName). Markdown filenames and links always use the canonical format and remain unchanged."
-                    ) { format in
-                        do {
-                            try app.updateJournalDateFormat(format)
-                            return true
-                        } catch {
-                            errorMessage = error.localizedDescription
-                            return false
-                        }
-                    }
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Graph Settings — \(graphName)")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
                 }
+                .padding(.horizontal, 50)
+                .frame(height: 51)
 
-                Section("Search Index") {
-                    LabeledContent("Index size", value: formattedCacheSize)
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Button(rebuilding ? "Rebuilding…" : "Rebuild Index") {
-                                Task { await rebuildIndex() }
+                Divider()
+
+                Form {
+                    Section("Journals") {
+                        JournalDateFormatControl(
+                            title: "Date format",
+                            format: app.journalDateFormat,
+                            explanation: "Used to display journal titles in \(graphName). Markdown filenames and links always use the canonical format and remain unchanged."
+                        ) { format in
+                            do {
+                                try app.updateJournalDateFormat(format)
+                                return true
+                            } catch {
+                                errorMessage = error.localizedDescription
+                                return false
                             }
-                            .disabled(rebuilding)
-                            if rebuilding { ProgressView().controlSize(.small) }
-                            Spacer()
                         }
-                        Text("The index is rebuilt from the Markdown files. Recent pages are preserved.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("Search Index") {
+                        LabeledContent("Index size", value: formattedCacheSize)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Button(rebuilding ? "Rebuilding…" : "Rebuild Index") {
+                                    Task { await rebuildIndex() }
+                                }
+                                .disabled(rebuilding)
+                                if rebuilding { ProgressView().controlSize(.small) }
+                                Spacer()
+                            }
+                            Text("The index is rebuilt from the Markdown files. Recent pages are preserved.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-
+                .formStyle(.grouped)
             }
-            .formStyle(.grouped)
-            .navigationTitle("Graph Settings — \(graphName)")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
         }
-        .frame(width: 520, height: 430)
+        .frame(width: SettingsLayout.width, height: SettingsLayout.height)
         .onAppear(perform: refreshCacheSize)
         .alert("Graph Settings Error", isPresented: Binding(
             get: { errorMessage != nil },
@@ -132,7 +150,9 @@ struct GraphSettingsView: View {
     }
 
     private var formattedCacheSize: String {
-        ByteCountFormatter.string(fromByteCount: cacheSize, countStyle: .file)
+        cacheSize.map {
+            ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+        } ?? "Unavailable"
     }
 
     private func refreshCacheSize() {
@@ -165,6 +185,8 @@ private struct JournalDateFormatControl: View {
 
     @State private var selection: String
     @State private var customDraft: String
+    @State private var lastApplied: JournalDateFormat?
+    @FocusState private var customFocused: Bool
 
     init(
         title: String,
@@ -196,24 +218,33 @@ private struct JournalDateFormatControl: View {
                     customDraft = format.pattern
                     return
                 }
-                apply(JournalDateFormat(pattern: value))
+                customFocused = false
+                applyValid(JournalDateFormat(pattern: value))
             }
             .onChange(of: format) { _, value in
+                if lastApplied == value {
+                    lastApplied = nil
+                    return
+                }
+                lastApplied = nil
                 selection = JournalDateFormat.presets.contains(value)
                     ? value.pattern : Self.customTag
                 customDraft = value.pattern
             }
 
             if selection == Self.customTag {
+                let candidate = JournalDateFormat(pattern: customDraft)
+                let validationError = candidate.validationError
                 TextField("Unicode date pattern", text: $customDraft)
-                    .onChange(of: customDraft) { _, value in
-                        guard let valid = JournalDateFormat(validating: value) else { return }
-                        apply(valid)
+                    .focused($customFocused)
+                    .onSubmit(commitCustomDraft)
+                    .onChange(of: customFocused) { wasFocused, isFocused in
+                        if wasFocused && !isFocused { commitCustomDraft() }
                     }
-                if let error = JournalDateFormat(pattern: customDraft).validationError {
+                if let error = validationError {
                     Text(error).font(.caption).foregroundStyle(.red)
-                } else if let valid = JournalDateFormat(validating: customDraft) {
-                    Text("Example: \(valid.string(from: sample))")
+                } else {
+                    Text("Example: \(candidate.string(from: sample))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -227,11 +258,20 @@ private struct JournalDateFormatControl: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .onDisappear(perform: commitCustomDraft)
     }
 
-    private func apply(_ candidate: JournalDateFormat) {
+    private func commitCustomDraft() {
+        guard selection == Self.customTag else { return }
+        let candidate = JournalDateFormat(pattern: customDraft)
         guard candidate.validationError == nil else { return }
+        applyValid(candidate)
+    }
+
+    private func applyValid(_ candidate: JournalDateFormat) {
+        lastApplied = candidate
         guard onChange(candidate) else {
+            lastApplied = nil
             selection = JournalDateFormat.presets.contains(format)
                 ? format.pattern : Self.customTag
             customDraft = format.pattern

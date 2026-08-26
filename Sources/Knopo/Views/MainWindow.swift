@@ -73,18 +73,11 @@ struct MainWindow: View {
                     goBack: { nav.goBack(steps: $0) },
                     goForward: { nav.goForward(steps: $0) })
             }
-            if #available(macOS 26.0, *) {
-                ToolbarItem(placement: .navigation) {
-                    GraphTitleSettingsControl(
-                        graphName: graphName, openSettings: openGraphSettings)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .navigation) {
-                    GraphTitleSettingsControl(
-                        graphName: graphName, openSettings: openGraphSettings)
-                }
+            ToolbarItem(placement: .navigation) {
+                GraphTitleSettingsControl(
+                    graphName: graphName, openSettings: openGraphSettings)
             }
+            .separateGraphTitleBackground()
         }
         .sheet(isPresented: $nav.searchPresented) {
             SearchPalette()
@@ -171,6 +164,7 @@ private struct GraphTitleSettingsControl: View {
     let graphName: String
     let openSettings: () -> Void
     @State private var hovered = false
+    @FocusState private var gearFocused: Bool
 
     var body: some View {
         Text(graphName)
@@ -186,12 +180,23 @@ private struct GraphTitleSettingsControl: View {
                 }
                 .buttonStyle(.plain)
                 .help("Graph Settings")
-                .opacity(hovered ? 1 : 0)
-                .allowsHitTesting(hovered)
+                .focused($gearFocused)
+                .opacity(hovered || gearFocused ? 1 : 0)
                 .accessibilityLabel("Graph Settings for \(graphName)")
             }
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
+    }
+}
+
+private extension ToolbarContent {
+    @ToolbarContentBuilder
+    func separateGraphTitleBackground() -> some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
     }
 }
 

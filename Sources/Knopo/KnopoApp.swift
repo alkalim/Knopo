@@ -75,9 +75,9 @@ final class GraphManager: ObservableObject {
         let hadConfig = FileManager.default.fileExists(
             atPath: root.appendingPathComponent(".knopo/config.json").path)
         let store = try GraphStore(root: root)
-        preferences.migrateThemeIfNeeded(from: store.config.theme)
+        preferences.migrateThemeIfNeeded(from: store.config.legacyTheme)
         if !hadConfig {
-            try store.updateConfig { $0.dateFormat = preferences.defaultDateFormat }
+            try? store.updateConfig { $0.dateFormat = preferences.defaultDateFormat }
         }
         Self.seedIfEmpty(store)
         return store
@@ -422,9 +422,8 @@ private struct WindowConfigurator: NSViewRepresentable {
             guard let window else { return }
             let siblings = window.tabGroup?.windows ?? [window]
             // Read the graph name live from the window title rather than the
-            // captured `graphName`: on a graph
-            // switch this coordinator may be a lingering stale one, but the
-            // window itself is stable and already carries the current graph.
+            // captured `graphName`: after a graph switch this coordinator may
+            // linger, but the stable window already carries the current graph.
             let graph = window.title
             let mixed = Set(siblings.map(\.title)).count > 1
             window.tab.title = mixed ? "\(graph) — \(pageTitle)" : pageTitle
@@ -449,8 +448,12 @@ private struct WindowConfigurator: NSViewRepresentable {
         // Defer until SwiftUI has attached the representable to its window.
         DispatchQueue.main.async {
             configure(nsView.window, c)
-            nsView.window?.title = graphName
-            nsView.window?.titleVisibility = .hidden
+            if nsView.window?.title != graphName {
+                nsView.window?.title = graphName
+            }
+            if nsView.window?.titleVisibility != .hidden {
+                nsView.window?.titleVisibility = .hidden
+            }
             c.refreshTabTitle()
             // Our change may flip a sibling tab's mixed state too.
             if changed { NotificationCenter.default.post(name: Self.windowsChanged, object: nil) }

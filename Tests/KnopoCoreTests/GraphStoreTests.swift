@@ -323,7 +323,9 @@ import Foundation
         let journals = try store.cache.journalPages()
         expectEqual(journals.map(\.nameKey), ["2026-06-11", "2026-06-10"])
         expectEqual(try store.cache.backlinks(of: "2026-06-11").count, 1)
-        expectEqual(store.page(named: "2026-06-10").displayTitle, "Jun 10th, 2026")
+        expectEqual(
+            store.page(named: "2026-06-10").displayTitle(using: .default),
+            "Jun 10th, 2026")
     }
 
     @Test func isoReferenceResolvesToUnderscoreJournal() throws {
@@ -343,7 +345,7 @@ import Foundation
         let day = store.page(named: "2026-06-10")
         expectTrue(day.fileExists)
         expectEqual(day.blocks.first?.content, "the imported day")
-        expectEqual(day.displayTitle, "Jun 10th, 2026")
+        expectEqual(day.displayTitle(using: .default), "Jun 10th, 2026")
         // No stub created for the ISO spelling.
         expectEqual(try store.cache.stubPageNames(), [])
     }
@@ -433,13 +435,13 @@ import Foundation
         let store = try makeGraph(["A": "- alpha\n", "B": "- beta\n"])
         try store.cache.recordVisit(pageKey: "a")
         try store.indexMaintenance.rebuild()
-        let rebuiltSize = store.indexMaintenance.sizeOnDisk()
+        let rebuiltSize = try #require(store.indexMaintenance.sizeOnDisk())
         try store.indexMaintenance.rebuild()
 
         expectEqual(Set(try store.cache.allPages().map(\.displayName)), Set(["A", "B"]))
         expectEqual(try store.cache.searchBlocks("alpha").first?.pageDisplayName, "A")
         expectEqual(try store.cache.recentPageKeys(), ["a"])
         expectTrue(rebuiltSize > 0)
-        expectEqual(store.indexMaintenance.sizeOnDisk(), rebuiltSize)
+        expectEqual(store.indexMaintenance.sizeOnDisk(), Optional(rebuiltSize))
     }
 }

@@ -9,6 +9,9 @@ import Foundation
 public struct JournalDateFormat: Codable, Equatable, Hashable, Sendable {
     public let pattern: String
 
+    private static let ordinalMarker = "\u{F8FF}"
+    private static let formatterCache = FormatterCache()
+
     public static let `default` = JournalDateFormat(pattern: "MMM d{ordinal}, yyyy")
 
     public static let presets: [JournalDateFormat] = [
@@ -56,6 +59,9 @@ public struct JournalDateFormat: Codable, Equatable, Hashable, Sendable {
         guard Self.hasBalancedQuotes(pattern) else {
             return "Close the quoted literal in the date format."
         }
+        guard !pattern.contains(Self.ordinalMarker) else {
+            return "The Apple logo character is not supported in date formats."
+        }
         guard !string(from: JournalDate(year: 2026, month: 6, day: 10)!).isEmpty else {
             return "This date format produces no text."
         }
@@ -71,14 +77,11 @@ public struct JournalDateFormat: Codable, Equatable, Hashable, Sendable {
         components.day = journalDate.day
         guard let date = components.date else { return journalDate.pageName }
 
-        let marker = "\u{F8FF}"
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Self.calendar
-        formatter.timeZone = Self.timeZone
-        formatter.dateFormat = pattern.replacingOccurrences(of: "{ordinal}", with: marker)
-        return formatter.string(from: date).replacingOccurrences(
-            of: marker, with: Self.ordinalSuffix(journalDate.day))
+        let formatterPattern = pattern.replacingOccurrences(
+            of: "{ordinal}", with: Self.ordinalMarker)
+        return Self.formatterCache.string(from: date, pattern: formatterPattern)
+            .replacingOccurrences(
+                of: Self.ordinalMarker, with: Self.ordinalSuffix(journalDate.day))
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,11 +94,11 @@ public struct JournalDateFormat: Codable, Equatable, Hashable, Sendable {
         try container.encode(pattern)
     }
 
-    private static var calendar: Calendar {
+    private static let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         return calendar
-    }
+    }()
 
     private static let timeZone = TimeZone(identifier: "UTC")!
 
@@ -129,5 +132,33 @@ public struct JournalDateFormat: Codable, Equatable, Hashable, Sendable {
 
     private static func isOutsideQuotes(atEndOf prefix: String) -> Bool {
         hasBalancedQuotes(prefix)
+    }
+
+    /// `DateFormatter` is expensive to construct and is not thread-safe. Keep
+    /// one per pattern and hold the lock for both lookup and formatting.
+    private final class FormatterCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var formatters: [String: DateFormatter] = [:]
+
+        func string(from date: Date, pattern: String) -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            let formatter: DateFormatter
+            if let cached = formatters[pattern] {
+                formatter = cached
+            } else {
+                if formatters.count >= 32 {
+                    formatters.removeAll(keepingCapacity: true)
+                }
+                let created = DateFormatter()
+                created.locale = Locale(identifier: "en_US_POSIX")
+                created.calendar = JournalDateFormat.calendar
+                created.timeZone = JournalDateFormat.timeZone
+                created.dateFormat = pattern
+                formatters[pattern] = created
+                formatter = created
+            }
+            return formatter.string(from: date)
+        }
     }
 }

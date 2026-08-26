@@ -25,7 +25,7 @@ import KnopoCore
     /// thing a reference row or preview shows.
     @Test func queryInACellRendersAsAChipNotItsResults() {
         var expansions = 0
-        let context = BlockRenderer.Context(resolveQuery: { _ in
+        let context = BlockRenderer.Context(journalDateFormat: .default, resolveQuery: { _ in
             expansions += 1
             return self.bigRegion(lines: 200)
         })
@@ -43,7 +43,7 @@ import KnopoCore
     /// Same for an embed — one line of cell can't hold a transcluded subtree.
     @Test func embedInACellRendersAsAChip() {
         var expansions = 0
-        let context = BlockRenderer.Context(resolveEmbed: { _ in
+        let context = BlockRenderer.Context(journalDateFormat: .default, resolveEmbed: { _ in
             expansions += 1
             return self.bigRegion(lines: 50)
         })
@@ -64,7 +64,8 @@ import KnopoCore
         var rendered = NSAttributedString()
         let elapsed = clock.measure {
             rendered = BlockRenderer.render(content: "| a |\n| --- |\n| \(long) |",
-                                            context: BlockRenderer.Context())
+                                            context: BlockRenderer.Context(
+                                                journalDateFormat: .default))
         }
         #expect(elapsed < .seconds(1))
         #expect(rendered.string.contains("…"))
@@ -75,7 +76,7 @@ import KnopoCore
     @Test func truncationKeepsAsMuchAsFits() {
         let rendered = BlockRenderer.render(
             content: "| a |\n| --- |\n| \(String(repeating: "wide ", count: 200)) |",
-            context: BlockRenderer.Context())
+            context: BlockRenderer.Context(journalDateFormat: .default))
         let cell = rendered.attributedSubstring(
             from: (rendered.string as NSString).range(of: "wide", options: .backwards))
         #expect(cell.length > 0)

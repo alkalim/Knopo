@@ -151,12 +151,12 @@ public final class CacheDB: @unchecked Sendable {
 
     /// Page-count based size of the logical SQLite database. This includes
     /// committed WAL contents without depending on volatile sidecar allocation.
-    public func logicalSize() -> Int64 {
-        (try? dbQueue.read { db in
+    public func logicalSize() -> Int64? {
+        try? dbQueue.read { db in
             let pageCount = try Int64.fetchOne(db, sql: "PRAGMA page_count") ?? 0
             let pageSize = try Int64.fetchOne(db, sql: "PRAGMA page_size") ?? 0
             return pageCount * pageSize
-        }) ?? 0
+        }
     }
 
     /// Whether this cache opened as a WAL pool. False means the single-connection
@@ -1236,6 +1236,8 @@ public final class CacheDB: @unchecked Sendable {
     }
 
     public func clearRecents() throws {
+        // TODO: expose this from the Recents list itself when that UI is
+        // designed; it deliberately does not belong in Graph Settings.
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM recents")
         }

@@ -224,16 +224,6 @@ enum KnopoURL {
     }
 }
 
-/// A page's list/header display title: journal pages show their pretty date
-/// ("Apr 21st, 2026"); other pages use the literal name. Shared by the
-/// All Pages view, references section, search palette, query results, and pane
-/// titles.
-func pageDisplayTitle(
-    _ name: String, dateFormat: JournalDateFormat = .default
-) -> String {
-    JournalDate(pageName: name)?.displayName(using: dateFormat) ?? name
-}
-
 /// Page-management actions shared by the page header and the right-pane card
 /// menu, so the delete/rename flows have a single source of truth (SPEC §13).
 @MainActor

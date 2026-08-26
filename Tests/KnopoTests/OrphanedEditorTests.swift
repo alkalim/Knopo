@@ -18,7 +18,8 @@ import KnopoCore
                               backing: .buffered, defer: false)
         window.contentView?.addSubview(cell)
         cell.showRendered(BlockRenderer.render(
-            content: "a block", context: BlockRenderer.Context()))
+            content: "a block",
+            context: BlockRenderer.Context(journalDateFormat: .default)))
         cell.layoutSubtreeIfNeeded()
         return (cell, window)
     }

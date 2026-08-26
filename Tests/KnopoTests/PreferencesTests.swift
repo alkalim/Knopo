@@ -103,4 +103,24 @@ struct PreferencesTests {
         #expect(app.displayTitle(for: "2026-06-10") == "2026-06-10")
         #expect(GraphConfig.load(from: app.store.configURL).dateFormat.pattern == "yyyy-MM-dd")
     }
+
+    @Test func rebuildPrunesFavouritesForDeletedPages() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-rebuild-favourites-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let preferences = Preferences(defaults: defaults(), syncsRenderer: false)
+        let store = try GraphStore(root: root)
+        var present = try store.createPage(named: "Present")
+        present.blocks[0].content = "content"
+        store.updatePage(present)
+        try store.savePage(named: present.name)
+        try store.updateConfig {
+            $0.favourites = ["Present", "Deleted"]
+        }
+        let app = AppState(store: store, preferences: preferences)
+
+        try await app.rebuildIndex()
+
+        #expect(app.store.config.favourites == ["Present"])
+    }
 }

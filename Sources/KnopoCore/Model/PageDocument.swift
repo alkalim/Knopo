@@ -50,10 +50,6 @@ public struct PageDocument: Identifiable, Sendable {
     }
 
     /// `title::` overrides the display name. (SPEC §4.2)
-    public var displayTitle: String {
-        displayTitle(using: .default)
-    }
-
     public func displayTitle(using dateFormat: JournalDateFormat) -> String {
         if let t = pageProperties.first(where: { $0.key == "title" })?.value,
            !t.isEmpty {

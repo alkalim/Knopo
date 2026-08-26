@@ -95,7 +95,9 @@ import KnopoCore
         let rendered = RenderedTextView.create()
         rendered.frame = NSRect(x: 0, y: 0, width: 400, height: 40)
         rendered.textStorage?.setAttributedString(
-            BlockRenderer.render(content: text, context: BlockRenderer.Context()))
+            BlockRenderer.render(
+                content: text,
+                context: BlockRenderer.Context(journalDateFormat: .default)))
 
         #expect(try baseline(of: editor) == BlockRenderer.firstBaselineOffset())
         #expect(try baseline(of: rendered) == BlockRenderer.firstBaselineOffset())

@@ -68,11 +68,14 @@ import KnopoCore
             time("render every block") {
                 for block in blocks {
                     _ = BlockRenderer.render(content: block.content,
-                                             context: BlockRenderer.Context())
+                                             context: BlockRenderer.Context(
+                                                journalDateFormat: .default))
                 }
             }
             let rendered = blocks.map {
-                BlockRenderer.render(content: $0.content, context: BlockRenderer.Context())
+                BlockRenderer.render(
+                    content: $0.content,
+                    context: BlockRenderer.Context(journalDateFormat: .default))
             }
             time("measure every row height") {
                 for attributed in rendered {
