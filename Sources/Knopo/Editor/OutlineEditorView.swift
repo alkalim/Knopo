@@ -1246,7 +1246,7 @@ final class OutlineEditorController: NSObject {
         }
 
         if result.hits.isEmpty {
-            line(NSAttributedString(string: "No matching blocks", attributes: [
+            line(NSAttributedString(string: L("No matching blocks"), attributes: [
                 .font: BlockRenderer.baseFont(), .foregroundColor: NSColor.tertiaryLabelColor]))
             finishRegion(body, linkAll: nil, interlineSpacing: 9, lineSpacing: 4)
             return body
@@ -1292,7 +1292,9 @@ final class OutlineEditorController: NSObject {
         }
         if result.total > result.hits.count {
             line(NSAttributedString(
-                string: "showing \(result.hits.count) of \(result.total)", attributes: [
+                string: String(localized: "showing \(result.hits.count) of \(result.total)",
+                               comment: "Query result footer: how many of the matches are listed"),
+                attributes: [
                     .font: NSFont.systemFont(ofSize: BlockRenderer.baseFontSize - 2),
                     .foregroundColor: NSColor.tertiaryLabelColor]))
         }

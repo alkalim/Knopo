@@ -10,6 +10,7 @@ Medium	Body font weight
 [Localizable]
 %lld blocks
 %lld blocks are referenced in %lld places. Delete anyway?	Delete-block confirmation; both counts are pluralized
+%lld of %lld	Find bar: which match of how many is selected
 A page named “%@” already exists	Error alert; the placeholder is the page name
 Actual Size
 Add to Favourites
@@ -31,6 +32,7 @@ Copy Block Reference
 Copy Subtree as Markdown
 Create
 Create page “%@”
+Create “%@”	Autocomplete row that creates a page; placeholder is its name
 Custom…
 Cut
 Dark	Appearance theme
@@ -81,6 +83,8 @@ New Tab
 New name
 New tag name
 Next match
+No matches
+No matching blocks
 No page named “%@”	Error alert; the placeholder is the page name
 No results
 No unlinked references.
@@ -127,9 +131,11 @@ Today
 Today's Journal
 Type to search
 URL (https://…)	Link panel: the link's destination
+Unavailable
 Undo
 Unfavourite
 Unicode date pattern
+Unknown error
 Unlinked References
 Use “/” for namespaces, e.g. Projects/Outliner
 Uses Unicode date patterns. Add {ordinal} immediately after d for English st/nd/rd/th.
@@ -144,7 +150,9 @@ insert image
 insert link
 live query
 pick a date
+showing %lld of %lld	Query result footer: how many of the matches are listed
 stub
+⧉ query	Placeholder chip for a query that cannot run here
 [Localizable:plurals]
 %lld blocks
 %lld blocks are referenced in %lld places. Delete anyway?

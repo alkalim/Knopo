@@ -45,8 +45,9 @@ struct FindBar: View {
 
     private var matchLabel: String {
         if nav.findQuery.isEmpty { return "" }
-        if nav.findMatchCount == 0 { return "No matches" }
-        return "\(nav.findOrdinal) of \(nav.findMatchCount)"
+        if nav.findMatchCount == 0 { return L("No matches") }
+        return String(localized: "\(nav.findOrdinal) of \(nav.findMatchCount)",
+                      comment: "Find bar: which match of how many is selected")
     }
 }
 

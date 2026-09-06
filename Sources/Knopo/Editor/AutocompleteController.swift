@@ -528,7 +528,10 @@ extension AutocompleteController: NSTableViewDataSource, NSTableViewDelegate {
                 .font: mainFont, .foregroundColor: NSColor.labelColor,
             ])
         case .createPage(let name):
-            return NSAttributedString(string: "Create \u{201C}\(name)\u{201D}", attributes: [
+            return NSAttributedString(
+                string: String(localized: "Create \u{201C}\(name)\u{201D}",
+                               comment: "Autocomplete row that creates a page; placeholder is its name"),
+                attributes: [
                 .font: mainFont, .foregroundColor: NSColor.controlAccentColor,
             ])
         case .block(let hit):

@@ -145,14 +145,16 @@ struct GraphSettingsView: View {
         )) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
-            Text(errorMessage ?? "Unknown error")
+            // `??` yields a String, so this takes Text's verbatim overload and
+            // the fallback has to be localized here.
+            Text(errorMessage ?? L("Unknown error"))
         }
     }
 
     private var formattedCacheSize: String {
         cacheSize.map {
             ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
-        } ?? "Unavailable"
+        } ?? L("Unavailable")
     }
 
     private func refreshCacheSize() {

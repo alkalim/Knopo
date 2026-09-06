@@ -1184,7 +1184,9 @@ enum BlockRenderer {
                 } else {
                     // No resolver here (e.g. a backlink list) — a muted chip, not
                     // the raw `{{query …}}` syntax.
-                    out.append(NSAttributedString(string: "⧉ query", attributes: attrs([
+                    let chip = String(localized: "⧉ query",
+                                      comment: "Placeholder chip for a query that cannot run here")
+                    out.append(NSAttributedString(string: chip, attributes: attrs([
                         .foregroundColor: NSColor.secondaryLabelColor,
                     ])))
                 }
