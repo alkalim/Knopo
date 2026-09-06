@@ -9,7 +9,8 @@ Knopo's interface is English by default and picks up any language you add here.
 ```
 
 That creates `Localization/zh-Hans.lproj/` holding every string, with the English
-text on both sides of each line. Replace the right-hand sides.
+text on both sides of each line and, where one exists, a comment above it saying
+what the string is for. Replace the right-hand sides.
 
 Name the directory with the language tag macOS uses. The ones asked for most:
 

@@ -62,14 +62,16 @@ def quote(text):
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 # The baseline is grouped into [Table] sections.
-keys, table = {}, "Localizable"
+keys, table, skip = {}, "Localizable", False
 for line in open(base).read().splitlines():
     if not line or line.startswith("#"):
         continue
     if line.startswith("[") and line.endswith("]"):
-        table = line[1:-1]
-    else:
-        keys.setdefault(table, []).append(line)
+        name = line[1:-1]
+        skip = name.endswith(":plurals")   # repeats keys listed above
+        table = name[:-len(":plurals")] if skip else name
+    elif not skip:
+        keys.setdefault(table, []).append(line.partition("\t")[0])
 
 def pseudo_plurals(src_path):
     """Accent the variants; bracket and pad only the composed format."""
