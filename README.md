@@ -118,7 +118,8 @@ regenerated at any time.
 
 ## Build / test / run
 
-A Swift Package - builds with the Command Line Tools, no Xcode required.
+A Swift Package - builds, runs and tests with the Command Line Tools, no Xcode
+required.
 
 ```sh
 swift build                                    # build
@@ -127,7 +128,8 @@ KNOPO_GRAPH=/path/to/graph swift run Knopo     # run against a graph folder
 ```
 
 `KNOPO_GRAPH` defaults to `~/Documents/Knopo`; the folder is created and seeded
-on first launch. To produce a double-clickable `.app`, see `scripts/build-app.sh`.
+on first launch. To produce a double-clickable `.app`, run
+`./scripts/build-app.sh release` - that step needs Xcode, for the app icon only.
 
 ## Translating
 
