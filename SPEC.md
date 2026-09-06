@@ -78,7 +78,7 @@ Page {
 
 Rules:
 
-- Page names are unique **case-insensitively**: `[[Project X]]` and `[[project x]]` resolve to the same page. The comparison uses Unicode default case folding and is deliberately **locale-independent**: a Turkish locale must not fold `I` to `ı` and split `[[Istanbul]]` across two files. The display name uses the casing from when the page was first created; renaming can change it.
+- Page names are unique **case-insensitively**: `[[Project X]]` and `[[project x]]` resolve to the same page. Matching is a **locale-independent** Unicode lowercasing, so a Turkish locale cannot fold `I` to `ı` and split `[[Istanbul]]` across two files. It is not full case folding: `Straße` and `STRASSE` stay two pages. The display name uses the casing from when the page was first created; renaming can change it.
 - Forbidden characters in page names: `/ \ # [ ]` and leading/trailing whitespace. `/` is reserved for hierarchy (see below).
 - **Namespaces**: a `/` in a page name (`[[Projects/Outliner]]`) creates a flat page whose name contains the separator. The page browser groups such pages hierarchically for display, but there is no inheritance or other semantics.
 - A page exists if (a) its file exists, or (b) it is referenced from somewhere. Case (b) is a **stub page**: it has no file until the user adds content to it. Linked references still work on stubs.
