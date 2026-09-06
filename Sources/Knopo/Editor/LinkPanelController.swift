@@ -54,19 +54,16 @@ final class LinkPanelController: NSObject {
         let labelY = height - pad - fieldH
         let urlY = labelY - rowGap - fieldH
 
-        let labelCaption = caption("Label", x: pad, y: labelY + fieldH + 1, width: 60)
-        let urlCaption = caption("URL", x: pad, y: urlY + fieldH + 1, width: 60)
-        labelCaption.isHidden = true // captions add clutter; use placeholders instead
-        urlCaption.isHidden = true
-
         let label = NSTextField(frame: NSRect(x: pad, y: labelY, width: width - pad * 2, height: fieldH))
-        label.placeholderString = "Label"
+        label.placeholderString = String(localized: "Label",
+                                         comment: "Link panel: the link's visible text")
         label.font = .systemFont(ofSize: 13)
         label.delegate = self
         label.bezelStyle = .roundedBezel
 
         let url = NSTextField(frame: NSRect(x: pad, y: urlY, width: width - pad * 2, height: fieldH))
-        url.placeholderString = "URL (https://…)"
+        url.placeholderString = String(localized: "URL (https://…)",
+                                       comment: "Link panel: the link's destination")
         url.font = .systemFont(ofSize: 13)
         url.stringValue = clipboardURL ?? ""
         url.delegate = self
@@ -75,18 +72,16 @@ final class LinkPanelController: NSObject {
         label.nextKeyView = url
         url.nextKeyView = label
 
-        let insert = NSButton(title: "Insert", target: self, action: #selector(confirm))
+        let insert = NSButton(title: L("Insert"), target: self, action: #selector(confirm))
         insert.bezelStyle = .rounded
         insert.keyEquivalent = "\r"
         insert.frame = NSRect(x: width - pad - 80, y: pad - 2, width: 80, height: 24)
         insert.isEnabled = !(clipboardURL ?? "").isEmpty
 
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
+        let cancel = NSButton(title: L("Cancel"), target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
         cancel.frame = NSRect(x: width - pad - 80 - 84, y: pad - 2, width: 80, height: 24)
 
-        effect.addSubview(labelCaption)
-        effect.addSubview(urlCaption)
         effect.addSubview(label)
         effect.addSubview(url)
         effect.addSubview(insert)
@@ -124,14 +119,6 @@ final class LinkPanelController: NSObject {
         textView.window?.addChildWindow(panel, ordered: .above)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(label)
-    }
-
-    private func caption(_ text: String, x: CGFloat, y: CGFloat, width: CGFloat) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.font = .systemFont(ofSize: 10)
-        field.textColor = .secondaryLabelColor
-        field.frame = NSRect(x: x, y: y, width: width, height: 12)
-        return field
     }
 
     @objc private func confirm() {

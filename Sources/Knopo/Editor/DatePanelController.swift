@@ -53,12 +53,12 @@ final class DatePanelController: NSObject {
             y: height - pad - pickerSize.height,
             width: pickerSize.width, height: pickerSize.height)
 
-        let insert = NSButton(title: "Insert", target: self, action: #selector(confirm))
+        let insert = NSButton(title: L("Insert"), target: self, action: #selector(confirm))
         insert.bezelStyle = .rounded
         insert.keyEquivalent = "\r"
         insert.frame = NSRect(x: width - pad - buttonW, y: pad, width: buttonW, height: buttonH)
 
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
+        let cancel = NSButton(title: L("Cancel"), target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}" // Esc
         cancel.frame = NSRect(x: insert.frame.minX - buttonGap - buttonW, y: pad,

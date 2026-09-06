@@ -1,6 +1,8 @@
 import CryptoKit
 import Foundation
 
+/// English is the library's default; the app localizes these cases at its own
+/// boundary (`NSAlert(for:)`), so the engine never reads `Bundle.main`.
 public enum GraphError: LocalizedError {
     case invalidPageName(String)
     case pageAlreadyExists(String)

@@ -78,6 +78,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!--
+      Load-bearing, not decorative: with .lproj directories present but no
+      matching one for the user's language, CFBundle otherwise falls back to
+      whichever localization it happens to find — a pseudo-localized test
+      bundle included. With this set, an unshipped language resolves to the
+      development region, and every key is already English.
+    -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleName</key>
     <string>Knopo</string>
     <key>CFBundleDisplayName</key>
@@ -107,6 +116,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Localizations, before codesign: otherwise CodeResources seals a Resources
+# directory that no longer matches and the signature breaks.
+for lproj in Localization/*.lproj; do
+  cp -R "$lproj" "$APP/Contents/Resources/"
+done
 
 # Ad-hoc signature: required for arm64 binaries to launch from Finder.
 codesign --force --sign - "$APP" >/dev/null 2>&1

@@ -211,17 +211,20 @@ final class BlockEditorTextView: NSTextView {
         if selectedRange().length > 0 {
             let selected = (string as NSString).substring(with: selectedRange())
             let short = selected.count > 24 ? selected.prefix(24) + "…" : selected[...]
-            let lookUp = NSMenuItem(title: "Look Up “\(short)”",
-                                    action: #selector(lookUpSelection), keyEquivalent: "")
+            let lookUp = NSMenuItem(
+                title: String(localized: "Look Up “\(short)”",
+                              comment: "Text menu; the placeholder is the selected text"),
+                action: #selector(lookUpSelection), keyEquivalent: ""
+            )
             lookUp.target = self
             menu.addItem(lookUp)
             menu.addItem(.separator())
         }
-        menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: L("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: L("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: L("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Select All",
+        menu.addItem(withTitle: L("Select All"),
                      action: #selector(NSText.selectAll(_:)), keyEquivalent: "")
         return menu
     }

@@ -37,7 +37,7 @@ struct ReferencesSection: View {
 
         HStack(spacing: 6) {
             Text("Linked References").font(.headline)
-            Text("\(hits.count)")
+            Text(verbatim: "\(hits.count)")   // a number, not a key
                 .font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
                 .background(Capsule().fill(Color.accentColor.opacity(0.2)))
         }
@@ -96,7 +96,7 @@ struct ReferencesSection: View {
                     .foregroundStyle(.tertiary)
                 Text("Unlinked References").font(.headline)
                 if unlinkedExpanded {
-                    Text("\(hits.count)")
+                    Text(verbatim: "\(hits.count)")   // a number, not a key
                         .font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Capsule().fill(Color.secondary.opacity(0.15)))
                 }
@@ -191,7 +191,9 @@ struct BacklinkRow: View {
                     .frame(width: 5, height: 5)
                     .padding(.top, 5)
                 if editing {
-                    TextField("", text: $draft, axis: .vertical)
+                    // `as String` picks the verbatim initializer: an empty
+                    // label is not a key.
+                    TextField("" as String, text: $draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
                         .onSubmit(commitEdit)

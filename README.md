@@ -129,6 +129,11 @@ KNOPO_GRAPH=/path/to/graph swift run Knopo     # run against a graph folder
 `KNOPO_GRAPH` defaults to `~/Documents/Knopo`; the folder is created and seeded
 on first launch. To produce a double-clickable `.app`, see `scripts/build-app.sh`.
 
+## Translating
+
+The interface is English and picks up any language you add. To add one, see
+[Localization/README.md](Localization/README.md).
+
 ## Running a downloaded build
 
 This app is not notarized, so macOS Gatekeeper blocks a *downloaded* copy on first

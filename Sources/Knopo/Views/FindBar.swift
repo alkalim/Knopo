@@ -72,7 +72,8 @@ struct FindSearchField: NSViewRepresentable {
         field.delegate = context.coordinator
         field.sendsSearchStringImmediately = true // incremental: match as you type
         field.sendsWholeSearchString = false
-        field.placeholderString = "Find in page"
+        field.placeholderString = String(localized: "Find in page",
+                                         comment: "Find bar search field placeholder")
         field.focusRingType = .none
         field.stringValue = text
         return field
@@ -128,8 +129,10 @@ struct FindStepper: NSViewRepresentable {
     func makeNSView(context: Context) -> NSSegmentedControl {
         let seg = NSSegmentedControl(
             images: [
-                NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Previous match")!,
-                NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Next match")!,
+                NSImage(systemSymbolName: "chevron.up",
+                        accessibilityDescription: L("Previous match"))!,
+                NSImage(systemSymbolName: "chevron.down",
+                        accessibilityDescription: L("Next match"))!,
             ],
             trackingMode: .momentary,
             target: context.coordinator,

@@ -218,9 +218,9 @@ private struct NavSegmentedControl: NSViewRepresentable {
         control.segmentCount = 2
         control.trackingMode = .momentary
         control.setImage(NSImage(systemSymbolName: "chevron.backward",
-                                 accessibilityDescription: "Back"), forSegment: 0)
+                                 accessibilityDescription: L("Back")), forSegment: 0)
         control.setImage(NSImage(systemSymbolName: "chevron.forward",
-                                 accessibilityDescription: "Forward"), forSegment: 1)
+                                 accessibilityDescription: L("Forward")), forSegment: 1)
         control.setShowsMenuIndicator(false, forSegment: 0)
         control.setShowsMenuIndicator(false, forSegment: 1)
         control.target = context.coordinator

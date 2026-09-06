@@ -212,8 +212,8 @@ final class Navigator: ObservableObject {
         switch target {
         case .page(let name, _): return app.displayTitle(for: name)
         case .tag(let tag): return "#\(tag)"
-        case .journalHome: return "Journal"
-        case .allPages: return "All Pages"
+        case .journalHome: return SectionName.journal
+        case .allPages: return SectionName.allPages
         }
     }
 

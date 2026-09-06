@@ -209,6 +209,8 @@ final class AutocompleteController: NSObject {
             items = fetchTags(query).prefix(12).map(Item.tag)
         case .command:
             // Slash commands (SPEC §5.5). Filter by command-name prefix.
+            // The `/name` triggers stay English: they are what the user types,
+            // and `matches` filters on them. Only the hints are localized.
             let today = JournalDate.today()
             let q = query.lowercased()
             func matches(_ name: String) -> Bool { q.isEmpty || name.hasPrefix(q) }
@@ -227,22 +229,22 @@ final class AutocompleteController: NSObject {
             }
             if matches("date") {
                 // Opens a calendar to reference *any* day (§5.5.4), not just today.
-                out.append(.commandDatePicker(label: "/date", hint: "pick a date"))
+                out.append(.commandDatePicker(label: "/date", hint: L("pick a date")))
             }
             // Block-level (§5.5).
             if matches("quote") {
-                out.append(.commandPrefix(label: "/quote", prefix: "> ", hint: "block quote"))
+                out.append(.commandPrefix(label: "/quote", prefix: "> ", hint: L("block quote")))
             }
             if matches("code-block") {
                 // ```\n\n``` with the caret at the end of the opening fence.
                 out.append(.commandInsertCaret(
-                    label: "/code-block", text: "```\n\n```", caretOffset: 3, hint: "fenced code"))
+                    label: "/code-block", text: "```\n\n```", caretOffset: 3, hint: L("fenced code")))
             }
             if matches("link") {
-                out.append(.commandLink(label: "/link", hint: "insert link"))
+                out.append(.commandLink(label: "/link", hint: L("insert link")))
             }
             if matches("image") {
-                out.append(.commandImage(label: "/image", hint: "insert image"))
+                out.append(.commandImage(label: "/image", hint: L("insert image")))
             }
             // Read-only transclusions (§7.6). Both insert a skeleton and drop
             // the caret inside the inner brackets so the page / block picker
@@ -251,18 +253,18 @@ final class AutocompleteController: NSObject {
             if matches("embed") || matches("page-embed") {
                 out.append(.commandInsertCaret(
                     label: "/page-embed", text: "{{embed [[]]}}", caretOffset: 10,
-                    hint: "embed a page"))
+                    hint: L("embed a page")))
             }
             if matches("embed") || matches("block-embed") {
                 out.append(.commandInsertCaret(
                     label: "/block-embed", text: "{{embed (())}}", caretOffset: 10,
-                    hint: "embed a block"))
+                    hint: L("embed a block")))
             }
             // Live query (§17): a `{{query }}` skeleton with the caret inside,
             // ready to type a filter (e.g. `#tag TODO` or `(and …)`).
             if matches("query") {
                 out.append(.commandInsertCaret(
-                    label: "/query", text: "{{query }}", caretOffset: 8, hint: "live query"))
+                    label: "/query", text: "{{query }}", caretOffset: 8, hint: L("live query")))
             }
             items = out
         }

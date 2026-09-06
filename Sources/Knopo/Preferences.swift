@@ -10,7 +10,15 @@ final class Preferences: ObservableObject {
     enum Theme: String, CaseIterable {
         case system, light, dark
 
-        var title: String { rawValue.capitalized }
+        /// Explicit per case, never derived from `rawValue`: that is persisted
+        /// under `appearanceTheme`.
+        var title: String {
+            switch self {
+            case .system: return String(localized: "System", comment: "Appearance theme")
+            case .light: return String(localized: "Light", comment: "Appearance theme")
+            case .dark: return String(localized: "Dark", comment: "Appearance theme")
+            }
+        }
     }
 
     static let standard = Preferences()

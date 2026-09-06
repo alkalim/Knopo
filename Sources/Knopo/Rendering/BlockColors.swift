@@ -9,7 +9,20 @@ enum BlockColor: String, CaseIterable {
 
     static let propertyKey = "background-color"
 
-    var displayName: String { rawValue.capitalized }
+    /// Explicit per case, never `rawValue`: that is the Markdown property
+    /// written to disk (`background-color:: red`) and stays English (SPEC §4.2).
+    var displayName: String {
+        switch self {
+        case .gray: return String(localized: "Gray", comment: "Block background color")
+        case .red: return String(localized: "Red", comment: "Block background color")
+        case .orange: return String(localized: "Orange", comment: "Block background color")
+        case .yellow: return String(localized: "Yellow", comment: "Block background color")
+        case .green: return String(localized: "Green", comment: "Block background color")
+        case .blue: return String(localized: "Blue", comment: "Block background color")
+        case .purple: return String(localized: "Purple", comment: "Block background color")
+        case .pink: return String(localized: "Pink", comment: "Block background color")
+        }
+    }
 
     /// Soft fill drawn behind the block — light pastel in Aqua, muted in dark.
     var background: NSColor {

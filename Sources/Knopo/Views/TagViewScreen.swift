@@ -25,10 +25,10 @@ struct TagViewScreen: View {
             VStack(alignment: .leading, spacing: 12) {
                 if !inPane {
                     HStack {
-                        Text("#\(tag)")
+                        Text(verbatim: "#\(tag)")   // the tag is data, not a key
                             .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(.purple)
-                        Text("\(hits.count) block\(hits.count == 1 ? "" : "s")")
+                        Text("\(hits.count) blocks")   // pluralized in Localization/en.lproj
                             .foregroundStyle(.secondary)
                         Spacer()
                         ActionsMenu {
@@ -139,7 +139,7 @@ struct TagViewScreen: View {
             renameShown = false
             nav.navigate(to: .tag(newTag))
         } catch {
-            NSAlert(error: error).runModal()
+            NSAlert(for: error).runModal()
         }
     }
 }

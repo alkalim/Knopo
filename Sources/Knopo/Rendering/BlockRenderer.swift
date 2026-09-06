@@ -101,7 +101,11 @@ enum BlockRenderer {
 
     /// Shown in an empty block that is a page's only content (SPEC §5.4) — the
     /// app's single empty-state affordance, whether the block is focused or not.
-    static let emptyBlockHint = "Start typing, or / for commands"
+    /// Computed: a stored `let` would freeze the string at first access.
+    static var emptyBlockHint: String {
+        String(localized: "Start typing, or / for commands",
+               comment: "Placeholder in the only, empty block of a page")
+    }
 
     /// Draws `hint` where the block's first glyph would go. Both the focused
     /// editor and the rendered row call this, so the hint doesn't shift or change
@@ -311,12 +315,6 @@ enum BlockRenderer {
             ) ?? .max
         }
 
-        var displayName: String {
-            switch self {
-            case .max: return "Maximum Width"
-            case .min: return "Minimum Width"
-            }
-        }
     }
 
     /// Inline-code glyph color: a dark grey (not pure body-text black) so it
@@ -368,11 +366,20 @@ enum BlockRenderer {
             }
         }
 
+        /// Separate literals on purpose - do not "simplify" into
+        /// `rawValue.capitalized`, which is the persisted value.
+        ///
+        /// Its own table because "Light" is also an appearance theme, and the two
+        /// want different words in most languages. The name must be a literal:
+        /// `scripts/l10n-extract.sh` cannot see it through a constant.
         var title: String {
             switch self {
-            case .light: return "Light"
-            case .medium: return "Medium"
-            case .heavy: return "Heavy"
+            case .light:
+                return String(localized: "Light", table: "FontWeight", comment: "Body font weight")
+            case .medium:
+                return String(localized: "Medium", table: "FontWeight", comment: "Body font weight")
+            case .heavy:
+                return String(localized: "Heavy", table: "FontWeight", comment: "Body font weight")
             }
         }
     }

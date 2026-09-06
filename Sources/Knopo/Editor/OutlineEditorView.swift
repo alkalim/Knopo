@@ -1868,12 +1868,8 @@ final class OutlineEditorController: NSObject {
             subtreeIDs.append(contentsOf: [id] + block.children.flattened.map(\.id))
         }
         let count = (try? app.store.cache.incomingRefCount(forBlockIDs: subtreeIDs)) ?? 0
-        if count > 0 {
-            let alert = NSAlert()
-            alert.messageText = "These blocks are referenced in \(count) place\(count == 1 ? "" : "s"). Delete anyway?"
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        if count > 0, !Self.confirmDeleteReferenced(blocks: ids.count, places: count) {
+            return false
         }
         var doc = app.document(for: pageName)
         Self.removeBlocks(Set(ids), from: &doc.blocks)
@@ -1882,6 +1878,19 @@ final class OutlineEditorController: NSObject {
         clearSelection()
         reloadAndFocus(nil, selection: nil)
         return true
+    }
+
+    /// Confirms deleting referenced blocks (SPEC §7.4). One key for both call
+    /// sites, plural on the subject *and* the place count.
+    private static func confirmDeleteReferenced(blocks: Int, places: Int) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = String(
+            localized: "\(blocks) blocks are referenced in \(places) places. Delete anyway?",
+            comment: "Delete-block confirmation; both counts are pluralized"
+        )
+        alert.addButton(withTitle: L("Delete"))
+        alert.addButton(withTitle: L("Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Undo-menu wording for a removal: a cut is one action, not a copy and a delete.
@@ -2237,12 +2246,14 @@ final class OutlineEditorController: NSObject {
         if selectedRows.count > 1,
            let row = rows.firstIndex(where: { $0.block.id == id }), selectedRows.contains(row) {
             let menu = NSMenu()
-            let copy = NSMenuItem(title: "Copy \(selectedRows.count) Blocks",
+            let copy = NSMenuItem(title: String(localized: "Copy \(selectedRows.count) Blocks",
+                                               comment: "Block context menu, multi-selection"),
                                   action: #selector(copySelectionAction), keyEquivalent: "")
             copy.target = self
             menu.addItem(copy)
             menu.addItem(.separator())
-            let delete = NSMenuItem(title: "Delete \(selectedRows.count) Blocks",
+            let delete = NSMenuItem(title: String(localized: "Delete \(selectedRows.count) Blocks",
+                                                 comment: "Block context menu, multi-selection"),
                                     action: #selector(deleteSelectionAction), keyEquivalent: "")
             delete.target = self
             menu.addItem(delete)
@@ -2251,13 +2262,13 @@ final class OutlineEditorController: NSObject {
         }
         let menu = NSMenu()
         let copyRef = NSMenuItem(
-            title: "Copy Block Reference", action: #selector(copyBlockRef(_:)), keyEquivalent: ""
+            title: L("Copy Block Reference"), action: #selector(copyBlockRef(_:)), keyEquivalent: ""
         )
         copyRef.target = self
         copyRef.representedObject = id
         menu.addItem(copyRef)
         let copyMarkdown = NSMenuItem(
-            title: "Copy Subtree as Markdown",
+            title: L("Copy Subtree as Markdown"),
             action: #selector(copySubtreeMarkdown(_:)), keyEquivalent: ""
         )
         copyMarkdown.target = self
@@ -2266,13 +2277,13 @@ final class OutlineEditorController: NSObject {
 
         menu.addItem(.separator())
         contextMenuBlockID = id
-        let colorItem = NSMenuItem(title: "Background Color", action: nil, keyEquivalent: "")
+        let colorItem = NSMenuItem(title: L("Background Color"), action: nil, keyEquivalent: "")
         colorItem.submenu = backgroundColorMenu(for: id)
         menu.addItem(colorItem)
 
         menu.addItem(.separator())
         let delete = NSMenuItem(
-            title: "Delete Block", action: #selector(deleteBlockAction(_:)), keyEquivalent: ""
+            title: L("Delete Block"), action: #selector(deleteBlockAction(_:)), keyEquivalent: ""
         )
         delete.target = self
         delete.representedObject = id
@@ -2286,7 +2297,10 @@ final class OutlineEditorController: NSObject {
         let current = app.document(for: pageName).blocks.block(id: id)?
             .properties.first { $0.key == BlockColor.propertyKey }?.value
         let submenu = NSMenu()
-        let none = NSMenuItem(title: "None", action: #selector(setBlockColor(_:)), keyEquivalent: "")
+        let none = NSMenuItem(
+            title: String(localized: "None", comment: "Background-color submenu: clears the color"),
+            action: #selector(setBlockColor(_:)), keyEquivalent: ""
+        )
         none.target = self
         none.representedObject = ""        // empty = clear
         none.state = current == nil ? .on : .off
@@ -2363,14 +2377,7 @@ final class OutlineEditorController: NSObject {
         // Deleting a referenced block prompts (SPEC §7.4).
         let subtreeIDs = [rows[index].block.id] + rows[index].block.children.flattened.map(\.id)
         let count = (try? app.store.cache.incomingRefCount(forBlockIDs: subtreeIDs)) ?? 0
-        if count > 0 {
-            let alert = NSAlert()
-            alert.messageText =
-                "This block is referenced in \(count) place\(count == 1 ? "" : "s"). Delete anyway?"
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
+        if count > 0, !Self.confirmDeleteReferenced(blocks: 1, places: count) { return }
         var doc = app.document(for: pageName)
         guard let path = doc.blocks.path(to: id) else { return }
         let wasFocused = focusedBlockID == id

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  English plural rules - the one resource English cannot do without.
+
+  A missing `.strings` entry degrades to its key, which is already English. A
+  missing *plural* entry degrades to the key *formatted*: "1 blocks". So en.lproj
+  ships, carrying only this file.
+
+  Hand-authored, because xcstringstool is Xcode-only. scripts/test.sh lints it.
+-->
+<plist version="1.0">
+<dict>
+    <!-- Tag view header: how many blocks carry this tag. -->
+    <key>%lld blocks</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@count@</string>
+        <key>count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>one</key>
+            <string>%lld block</string>
+            <key>other</key>
+            <string>%lld blocks</string>
+        </dict>
+    </dict>
+
+    <!-- Delete-page confirmation. One key, not two concatenated sentences:
+         the count clause disappears at zero via the `zero` category. -->
+    <key>The file moves to the Trash. Links to this page become stubs. %lld block references into this page will break.</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@refs@</string>
+        <key>refs</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>zero</key>
+            <string>The file moves to the Trash. Links to this page become stubs.</string>
+            <key>one</key>
+            <string>The file moves to the Trash. Links to this page become stubs. %lld block reference into this page will break.</string>
+            <key>other</key>
+            <string>The file moves to the Trash. Links to this page become stubs. %lld block references into this page will break.</string>
+        </dict>
+    </dict>
+
+    <!-- Delete-block confirmation, both call sites. Two plural axes: the
+         subject noun and the number of referring places. -->
+    <key>%lld blocks are referenced in %lld places. Delete anyway?</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%1$#@blocks@ referenced in %2$#@places@. Delete anyway?</string>
+        <key>blocks</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>one</key>
+            <string>This block is</string>
+            <key>other</key>
+            <string>These %1$lld blocks are</string>
+        </dict>
+        <key>places</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>one</key>
+            <string>%2$lld place</string>
+            <key>other</key>
+            <string>%2$lld places</string>
+        </dict>
+    </dict>
+
+    <!-- Block context menu, multi-block selection. -->
+    <key>Copy %lld Blocks</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@count@</string>
+        <key>count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>one</key>
+            <string>Copy Block</string>
+            <key>other</key>
+            <string>Copy %lld Blocks</string>
+        </dict>
+    </dict>
+
+    <key>Delete %lld Blocks</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@count@</string>
+        <key>count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>one</key>
+            <string>Delete Block</string>
+            <key>other</key>
+            <string>Delete %lld Blocks</string>
+        </dict>
+    </dict>
+</dict>
+</plist>

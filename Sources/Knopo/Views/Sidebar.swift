@@ -42,7 +42,7 @@ struct Sidebar: View {
         List {
             Section {
                 sidebarRow(.journal, target: .journalHome) {
-                    Label("Journal", systemImage: "calendar").lineLimit(1)
+                    Label(SectionName.journal, systemImage: "calendar").lineLimit(1)
                 }
                 .contextMenu {
                     Button("Jump to Day…") {
@@ -64,7 +64,7 @@ struct Sidebar: View {
                     }
                 }
                 sidebarRow(.allPages, target: .allPages) {
-                    Label("All Pages", systemImage: "doc.on.doc").lineLimit(1)
+                    Label(SectionName.allPages, systemImage: "doc.on.doc").lineLimit(1)
                 }
             }
 
@@ -111,7 +111,7 @@ struct Sidebar: View {
                             HStack {
                                 rowLabel(entry.tag, icon: "number")
                                 Spacer(minLength: 4)
-                                Text("\(entry.count)")
+                                Text(verbatim: "\(entry.count)")   // a number, not a key
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .layoutPriority(1)

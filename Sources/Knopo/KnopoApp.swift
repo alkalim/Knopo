@@ -66,8 +66,11 @@ final class GraphManager: ObservableObject {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a graph folder (or create a new one). It will hold your pages as Markdown files."
-        panel.prompt = "Open Graph"
+        panel.message = String(
+            localized: "Choose a graph folder (or create a new one). It will hold your pages as Markdown files.",
+            comment: "Open-graph file picker explanation"
+        )
+        panel.prompt = L("Open Graph")
         return panel.runModal() == .OK ? panel.url : nil
     }
 
@@ -161,7 +164,7 @@ final class GraphHandle: ObservableObject {
             root = url
             manager.rememberLast(url)
         } catch {
-            NSAlert(error: error).runModal()
+            NSAlert(for: error).runModal()
         }
     }
 }
@@ -223,7 +226,8 @@ struct KnopoApp: App {
     var body: some Scene {
         // Each window owns its own graph (a `GraphHandle`); a new window opens
         // the last-used graph, and Open Graph… switches only that window.
-        WindowGroup("Knopo") {
+        // `as String`: the app's name is a proper noun, not a translatable key.
+        WindowGroup("Knopo" as String) {
             WindowRoot(manager: manager)
                 .frame(minWidth: 900, minHeight: 560)
         }
@@ -356,8 +360,8 @@ private struct GraphView: View {
     /// The current page/section — used as the window tab's label.
     private var currentTitle: String {
         switch nav.current {
-        case .journalHome: return "Journal"
-        case .allPages: return "All Pages"
+        case .journalHome: return SectionName.journal
+        case .allPages: return SectionName.allPages
         case .tag(let tag): return "#\(tag)"
         case .page(let name, _): return app.displayTitle(for: app.document(for: name))
         }

@@ -148,7 +148,7 @@ struct PageScreen: View {
             try nav.renamePage(from: pageName, to: renameText)
             renameSheetShown = false
         } catch {
-            NSAlert(error: error).runModal()
+            NSAlert(for: error).runModal()
         }
     }
 
@@ -175,7 +175,7 @@ struct BreadcrumbBar: View {
                 ForEach(1...path.count, id: \.self) { i in
                     let ancestorPath = Array(path.prefix(i))
                     if let block = doc.blocks.block(at: ancestorPath) {
-                        Text("›").foregroundStyle(.tertiary)
+                        Text(verbatim: "›").foregroundStyle(.tertiary)   // separator glyph
                         Button {
                             if i == path.count { return }
                             nav.navigate(to: .page(name: pageName, zoom: block.id))

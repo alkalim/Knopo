@@ -47,7 +47,7 @@ struct AllPagesView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 if !inPane {
-                    Text("All Pages").font(.system(size: 24, weight: .bold))
+                    Text(SectionName.allPages).font(.system(size: 24, weight: .bold))
                 }
                 Spacer()
                 Button {
@@ -87,7 +87,7 @@ struct AllPagesView: View {
                     )
                 }
                 if !journals.isEmpty {
-                    pageSection("Journal", id: .journal, listings: journals)
+                    pageSection(SectionName.journal, id: .journal, listings: journals)
                 }
             }
             .listStyle(.inset)
@@ -108,7 +108,7 @@ struct AllPagesView: View {
                     Text("stub").font(.caption2).foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Text("\(listing.blockCount)")
+                Text(verbatim: "\(listing.blockCount)")   // a number, not a key
                     .font(.caption).foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
@@ -205,7 +205,7 @@ struct AllPagesView: View {
             newPageShown = false
             nav.navigateToNewPage(named: newPageName)
         } catch {
-            NSAlert(error: error).runModal()
+            NSAlert(for: error).runModal()
         }
     }
 }

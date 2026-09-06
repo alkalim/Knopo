@@ -224,6 +224,47 @@ enum KnopoURL {
     }
 }
 
+/// Section names shared by the sidebar, window tab titles, pane headers and the
+/// history menu. Handed out already-localized, so `Text`/`Label` sites can take
+/// it through their verbatim overload. A tag's name is data, and stays out.
+@MainActor
+enum SectionName {
+    static var journal: String {
+        String(localized: "Journal", comment: "Sidebar section and window title: the journal")
+    }
+    static var allPages: String {
+        String(localized: "All Pages", comment: "Sidebar section and window title: the page list")
+    }
+}
+
+extension NSAlert {
+    /// Presents any error, localizing `GraphError` here: the engine is a UI-free
+    /// library and must not read the app's `Bundle.main`. Anything else falls
+    /// back to `localizedDescription`, like `NSAlert(error:)`.
+    convenience init(for error: Error) {
+        self.init()
+        alertStyle = .warning
+        messageText = Self.message(for: error)
+        addButton(withTitle: L("OK"))
+    }
+
+    private static func message(for error: Error) -> String {
+        switch error as? GraphError {
+        case .invalidPageName(let name):
+            return String(localized: "Invalid page name: “\(name)”",
+                          comment: "Error alert; the placeholder is the rejected page name")
+        case .pageAlreadyExists(let name):
+            return String(localized: "A page named “\(name)” already exists",
+                          comment: "Error alert; the placeholder is the page name")
+        case .pageNotFound(let name):
+            return String(localized: "No page named “\(name)”",
+                          comment: "Error alert; the placeholder is the page name")
+        case nil:
+            return error.localizedDescription
+        }
+    }
+}
+
 /// Page-management actions shared by the page header and the right-pane card
 /// menu, so the delete/rename flows have a single source of truth (SPEC §13).
 @MainActor
@@ -235,14 +276,16 @@ enum PageActions {
         let ids = doc.blocks.flattened.map(\.id)
         let refCount = (try? app.store.cache.incomingRefCount(forBlockIDs: ids)) ?? 0
         let alert = NSAlert()
-        alert.messageText = "Delete “\(app.displayTitle(for: doc))”?"
-        var info = "The file moves to the Trash. Links to this page become stubs."
-        if refCount > 0 {
-            info += " \(refCount) block reference\(refCount == 1 ? "" : "s") into this page will break."
-        }
-        alert.informativeText = info
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = String(localized: "Delete “\(app.displayTitle(for: doc))”?",
+                                   comment: "Confirmation title; the placeholder is the page name")
+        // One key for the whole paragraph: the count clause vanishes at zero
+        // through the `zero` category, and translators need to reorder it.
+        alert.informativeText = String(
+            localized: "The file moves to the Trash. Links to this page become stubs. \(refCount) block references into this page will break.",
+            comment: "Delete-page confirmation body; the count clause disappears at zero"
+        )
+        alert.addButton(withTitle: L("Delete"))
+        alert.addButton(withTitle: L("Cancel"))
         if alert.runModal() == .alertFirstButtonReturn {
             try? nav.deletePage(named: doc.name)
         }
@@ -252,32 +295,34 @@ enum PageActions {
     /// page view uses its own inline sheet).
     static func promptRename(_ name: String, nav: Navigator) {
         let alert = NSAlert()
-        alert.messageText = "Rename Page"
-        alert.informativeText = "Enter a new name for “\(name)”."
+        alert.messageText = L("Rename Page")
+        alert.informativeText = String(localized: "Enter a new name for “\(name)”.",
+                                       comment: "Rename-page prompt; placeholder is the page name")
         let field = NSTextField(string: name)
         field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
         alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("Rename"))
+        alert.addButton(withTitle: L("Cancel"))
         alert.window.initialFirstResponder = field
         if alert.runModal() == .alertFirstButtonReturn {
             let new = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard PageName.isValid(new), new != name else { return }
             do { try nav.renamePage(from: name, to: new) }
-            catch { NSAlert(error: error).runModal() }
+            catch { NSAlert(for: error).runModal() }
         }
     }
 
     /// Rename a tag (a label, not a page — §8) across the graph.
     static func promptRenameTag(_ tag: String, app: AppState, nav: Navigator) {
         let alert = NSAlert()
-        alert.messageText = "Rename Tag"
-        alert.informativeText = "Enter a new name for #\(tag)."
+        alert.messageText = L("Rename Tag")
+        alert.informativeText = String(localized: "Enter a new name for #\(tag).",
+                                       comment: "Rename-tag prompt; placeholder is the tag name")
         let field = NSTextField(string: tag)
         field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
         alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("Rename"))
+        alert.addButton(withTitle: L("Cancel"))
         alert.window.initialFirstResponder = field
         if alert.runModal() == .alertFirstButtonReturn {
             let new = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -286,7 +331,7 @@ enum PageActions {
                 try app.renameTag(from: tag, to: new)
                 nav.navigate(to: .tag(new))
             } catch {
-                NSAlert(error: error).runModal()
+                NSAlert(for: error).runModal()
             }
         }
     }

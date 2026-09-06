@@ -38,6 +38,10 @@ public struct JournalDateFormat: Codable, Equatable, Hashable, Sendable {
     }
 
     /// Nil when the pattern is suitable for saving from Settings.
+    ///
+    /// English for now: most of these describe the Unicode-pattern UI that the
+    /// semantic date styles retire. Localized once that ships - see
+    /// workdocs/design/localization.md, phase 2b.
     public var validationError: String? {
         guard !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Enter a date format."
