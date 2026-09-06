@@ -75,13 +75,9 @@ final class GraphManager: ObservableObject {
     }
 
     private func openStore(at root: URL) throws -> GraphStore {
-        let hadConfig = FileManager.default.fileExists(
-            atPath: root.appendingPathComponent(".knopo/config.json").path)
         let store = try GraphStore(root: root)
         preferences.migrateThemeIfNeeded(from: store.config.legacyTheme)
-        if !hadConfig {
-            try? store.updateConfig { $0.dateFormat = preferences.defaultDateFormat }
-        }
+        preferences.migrateDateFormatIfNeeded(from: store.config.legacyDateFormat)
         Self.seedIfEmpty(store)
         return store
     }

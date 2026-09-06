@@ -477,7 +477,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Graph display settings
 
-    var journalDateFormat: JournalDateFormat { store.config.dateFormat }
+    var journalDateFormat: JournalDateFormat { preferences.defaultDateFormat }
 
     func displayTitle(for pageName: String) -> String {
         JournalDate(pageName: pageName)?.displayName(using: journalDateFormat) ?? pageName
@@ -485,12 +485,6 @@ final class AppState: ObservableObject {
 
     func displayTitle(for document: PageDocument) -> String {
         document.displayTitle(using: journalDateFormat)
-    }
-
-    func updateJournalDateFormat(_ format: JournalDateFormat) throws {
-        guard format != store.config.dateFormat else { return }
-        try store.updateConfig { $0.dateFormat = format }
-        dataVersion += 1
     }
 
     func rebuildIndex() async throws {

@@ -91,7 +91,6 @@ struct TagViewScreen: View {
                             app?.store.resolveBlock(id)?.block.content
                         },
                         assetsDir: app.store.assetsDir,
-                        journalDateFormat: app.journalDateFormat,
                         tables: false // raw source in a snippet row (§5.2)
                     )
                 )))

@@ -81,8 +81,7 @@ import KnopoCore
     private func render(
         _ content: String, width: CGFloat?, mode: BlockRenderer.TableWidth = .max
     ) -> NSAttributedString {
-        BlockRenderer.render(content: content, context: BlockRenderer.Context(
-            journalDateFormat: .default, contentWidth: width, tableWidth: mode))
+        BlockRenderer.render(content: content, context: BlockRenderer.Context(journalDateFormat: .default, contentWidth: width, tableWidth: mode))
     }
 
     private func tableGeometry(_ rendered: NSAttributedString) -> BlockRenderer.TableGeometry? {

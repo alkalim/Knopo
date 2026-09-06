@@ -24,11 +24,12 @@ final class Preferences: ObservableObject {
     static let standard = Preferences()
 
     static let themeKey = "appearanceTheme"
-    static let defaultDateFormatKey = "defaultJournalDateFormat"
+    static let defaultDateFormatKey = BlockRenderer.journalDateFormatKey
 
     private let defaults: UserDefaults
     private let syncsRenderer: Bool
     private var themeWasSet: Bool
+    private var dateFormatWasSet: Bool
 
     @Published var theme: Theme {
         didSet {
@@ -57,10 +58,15 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// *The* journal date format, not a seed for a per-graph copy: it decides
+    /// how every window renders a journal title.
     @Published var defaultDateFormat: JournalDateFormat {
         didSet {
             guard defaultDateFormat != oldValue else { return }
             defaults.set(defaultDateFormat.pattern, forKey: Self.defaultDateFormatKey)
+            dateFormatWasSet = true
+            if syncsRenderer { BlockRenderer.journalDateFormat = defaultDateFormat }
+            renderRevision += 1
         }
     }
 
@@ -84,6 +90,7 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         self.syncsRenderer = syncsRenderer
         themeWasSet = defaults.object(forKey: Self.themeKey) != nil
+        dateFormatWasSet = defaults.object(forKey: Self.defaultDateFormatKey) != nil
         theme = Theme(rawValue: defaults.string(forKey: Self.themeKey) ?? "") ?? .system
         contentWeight = BlockRenderer.ContentWeight(
             rawValue: defaults.string(forKey: BlockRenderer.contentWeightKey) ?? "") ?? .medium
@@ -107,6 +114,7 @@ final class Preferences: ObservableObject {
             Self.apply(theme)
             BlockRenderer.contentWeight = contentWeight
             BlockRenderer.bracketsEnabled = showPageRefBrackets
+            BlockRenderer.journalDateFormat = defaultDateFormat
             BlockRenderer.zoom = zoom
             BlockRenderer.density = density
         }
@@ -121,6 +129,17 @@ final class Preferences: ObservableObject {
         // persistence path, so mark even that migration as complete explicitly.
         defaults.set(theme.rawValue, forKey: Self.themeKey)
         themeWasSet = true
+    }
+
+    /// Imports the old per-graph date format exactly once, like the theme above.
+    func migrateDateFormatIfNeeded(from legacyValue: JournalDateFormat) {
+        guard !dateFormatWasSet else { return }
+        defaultDateFormat = legacyValue
+        // Assigning the value it already holds skips didSet, so record the
+        // migration explicitly.
+        defaults.set(defaultDateFormat.pattern, forKey: Self.defaultDateFormatKey)
+        dateFormatWasSet = true
+        if syncsRenderer { BlockRenderer.journalDateFormat = defaultDateFormat }
     }
 
     private func setZoom(_ proposed: CGFloat) {

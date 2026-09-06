@@ -18,8 +18,7 @@ import KnopoCore
 
     private func render(_ content: String, tables: Bool = true) -> NSAttributedString {
         BlockRenderer.render(content: content,
-                             context: BlockRenderer.Context(
-                                journalDateFormat: .default, tables: tables))
+                             context: BlockRenderer.Context(journalDateFormat: .default, tables: tables))
     }
 
     private func tabStops(_ rendered: NSAttributedString, line: Int) -> [CGFloat] {

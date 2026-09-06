@@ -34,12 +34,11 @@ struct GeneralSettingsView: View {
 
             Section("Journals") {
                 JournalDateFormatControl(
-                    title: "Default date format",
+                    title: "Date format",
                     format: preferences.defaultDateFormat,
-                    explanation: "Copied to a new graph. Existing graphs keep their own format."
+                    explanation: "How journal titles are displayed, in every graph. Markdown filenames and links always use the canonical format and remain unchanged."
                 ) { format in
                     preferences.defaultDateFormat = format
-                    return true
                 }
             }
         }
@@ -52,7 +51,6 @@ struct GeneralSettingsView: View {
         let rendered = BlockRenderer.render(
             content: "A [[linked page]] with **bold text** and #notes",
             context: BlockRenderer.Context(
-                journalDateFormat: .default,
                 tables: false))
         return Text(AttributedString(rendered))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -96,22 +94,6 @@ struct GraphSettingsView: View {
                 Divider()
 
                 Form {
-                    Section("Journals") {
-                        JournalDateFormatControl(
-                            title: "Date format",
-                            format: app.journalDateFormat,
-                            explanation: "Used to display journal titles in \(graphName). Markdown filenames and links always use the canonical format and remain unchanged."
-                        ) { format in
-                            do {
-                                try app.updateJournalDateFormat(format)
-                                return true
-                            } catch {
-                                errorMessage = error.localizedDescription
-                                return false
-                            }
-                        }
-                    }
-
                     Section("Search Index") {
                         LabeledContent("Index size", value: formattedCacheSize)
                         VStack(alignment: .leading, spacing: 8) {
@@ -175,15 +157,14 @@ struct GraphSettingsView: View {
     }
 }
 
-/// Presets plus a validated custom Unicode pattern. `onChange` returns false
-/// when persistence failed, in which case the control restores its prior value.
+/// Presets plus a validated custom Unicode pattern.
 private struct JournalDateFormatControl: View {
     private static let customTag = "__custom__"
 
-    let title: String
+    let title: LocalizedStringKey
     let format: JournalDateFormat
-    let explanation: String
-    let onChange: (JournalDateFormat) -> Bool
+    let explanation: LocalizedStringKey
+    let onChange: (JournalDateFormat) -> Void
 
     @State private var selection: String
     @State private var customDraft: String
@@ -191,10 +172,10 @@ private struct JournalDateFormatControl: View {
     @FocusState private var customFocused: Bool
 
     init(
-        title: String,
+        title: LocalizedStringKey,
         format: JournalDateFormat,
-        explanation: String,
-        onChange: @escaping (JournalDateFormat) -> Bool
+        explanation: LocalizedStringKey,
+        onChange: @escaping (JournalDateFormat) -> Void
     ) {
         self.title = title
         self.format = format
@@ -272,12 +253,6 @@ private struct JournalDateFormatControl: View {
 
     private func applyValid(_ candidate: JournalDateFormat) {
         lastApplied = candidate
-        guard onChange(candidate) else {
-            lastApplied = nil
-            selection = JournalDateFormat.presets.contains(format)
-                ? format.pattern : Self.customTag
-            customDraft = format.pattern
-            return
-        }
+        onChange(candidate)
     }
 }

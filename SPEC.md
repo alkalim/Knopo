@@ -536,9 +536,8 @@ Settings have two ownership tiers and apply immediately:
 | General (`Cmd+,`) | Theme | Follow the system; light and dark overrides are app-wide. A legacy per-graph theme is imported once. |
 | General | Body font weight | Medium; Light and Heavy are app-wide alternatives. |
 | General | Page-link brackets | Hidden. |
-| General | Default journal date format | `Jun 10th, 2026`; copied when a folder without an existing `.knopo/config.json` is first opened. |
-| Graph Settings (`Option+Cmd+,`) | Journal date format | Stored in `.knopo/config.json`; presets and a custom Unicode pattern are supported. `d{ordinal}` is Knopo's English ordinal extension. |
-| Graph Settings | Search index | Shows stable logical size and can rebuild `cache.db` from Markdown without clearing recents. |
+| General | Journal date format | `Jun 10th, 2026`; app-wide, so every graph and window renders a journal title the same way. Presets and a custom Unicode pattern are supported; `d{ordinal}` is Knopo's English ordinal extension. A legacy per-graph format is imported once. |
+| Graph Settings (`Option+Cmd+,`) | Search index | Shows stable logical size and can rebuild `cache.db` from Markdown without clearing recents. |
 
 Zoom and line spacing remain View-menu actions (`Cmd +/-/0` and
 `Control+Cmd =/-/0`) rather than Settings fields. AI settings, preferences sync,

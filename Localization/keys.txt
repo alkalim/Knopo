@@ -36,6 +36,7 @@ Create “%@”	Autocomplete row that creates a page; placeholder is its name
 Custom…
 Cut
 Dark	Appearance theme
+Date format
 Decrease Line Spacing
 Delete
 Delete %lld Blocks	Block context menu, multi-selection
@@ -65,6 +66,7 @@ Graph Settings — %@
 Graph Settings…
 Gray	Block background color
 Green	Block background color
+How journal titles are displayed, in every graph. Markdown filenames and links always use the canonical format and remain unchanged.
 Increase Line Spacing
 Index size
 Insert

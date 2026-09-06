@@ -23,7 +23,8 @@ enum BlockRenderer {
         /// override). Returns nil to fall back to the literal name. Date pages
         /// are handled without this — their title is a pure function.
         var pageDisplayTitle: ((String) -> String?)?
-        /// Journal-title format owned by the graph being rendered.
+        /// Journal-title format. Defaults to the app-wide preference so every
+        /// render site honours it; passed explicitly only by tests.
         var journalDateFormat: JournalDateFormat
         /// Whether to draw faint `[[ ]]` around page references. Defaults to
         /// the user's stored preference so every render site honours it.
@@ -58,7 +59,7 @@ enum BlockRenderer {
              assetsDir: URL? = nil,
              inlineQuoteBar: Bool = true,
              pageDisplayTitle: ((String) -> String?)? = nil,
-             journalDateFormat: JournalDateFormat,
+             journalDateFormat: JournalDateFormat = BlockRenderer.journalDateFormat,
              pageRefBrackets: Bool = BlockRenderer.bracketsEnabled,
              resolveEmbed: @escaping (EmbedTarget) -> NSAttributedString? = { _ in nil },
              resolveQuery: @escaping (QueryExpr) -> NSAttributedString? = { _ in nil },
@@ -200,6 +201,16 @@ enum BlockRenderer {
     /// Per-app (a viewing/aesthetic choice), not per-graph data.
     static let pageRefBracketsKey = "showPageRefBrackets"
     static var bracketsEnabled = UserDefaults.standard.bool(forKey: pageRefBracketsKey)
+
+    /// Journal date format: an app-wide viewing preference, like the weight and
+    /// zoom below, so every graph and window renders a journal title the same
+    /// way. The key predates the move off per-graph config, so an existing
+    /// preference carries over unchanged.
+    static let journalDateFormatKey = "defaultJournalDateFormat"
+    static var journalDateFormat: JournalDateFormat = {
+        UserDefaults.standard.string(forKey: journalDateFormatKey)
+            .flatMap(JournalDateFormat.init(validating:)) ?? .default
+    }()
 
     /// The text shown for a `[[name]]` reference: a date renders as its display
     /// title ("Jun 10th, 2026"), other pages use a `title::` override if the

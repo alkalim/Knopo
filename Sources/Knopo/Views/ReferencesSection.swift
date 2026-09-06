@@ -156,7 +156,6 @@ struct ReferencesSection: View {
         BlockRenderer.Context(
             resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
             assetsDir: app.store.assetsDir,
-            journalDateFormat: app.journalDateFormat,
             // A reference row is a snippet in a SwiftUI `Text`: nothing there
             // draws a grid, so a table block shows its raw source (§5.2).
             tables: false
@@ -206,7 +205,6 @@ struct BacklinkRow: View {
                                 app?.store.resolveBlock(id)?.block.content
                             },
                             assetsDir: app.store.assetsDir,
-                            journalDateFormat: app.journalDateFormat,
                             tables: false // raw source in a snippet row (§5.2)
                         )
                     )))

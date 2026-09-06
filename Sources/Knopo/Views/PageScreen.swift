@@ -63,8 +63,7 @@ struct PageScreen: View {
         guard !lines.isEmpty else { return nil }
         let ctx = BlockRenderer.Context(
             resolveBlockRef: { app.store.resolveBlock($0)?.block.content },
-            assetsDir: app.store.assetsDir,
-            journalDateFormat: app.journalDateFormat)
+            assetsDir: app.store.assetsDir)
         // A `key:: value` line is a page property: render it dimmed as `key: value`
         // like block properties (§3.2), not as plain body text. Other preamble
         // lines (e.g. a leading `# Heading`) render as markdown.

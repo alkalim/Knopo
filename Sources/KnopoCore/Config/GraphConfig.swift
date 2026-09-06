@@ -8,8 +8,10 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     /// Ordered list of favourite tag names (normalized lowercase). Tags are
     /// labels, not pages (§8), so they favourite into their own list.
     public var favouriteTags: [String] = []
-    /// Display format for journal dates.
-    public var dateFormat: JournalDateFormat = .default
+    /// Legacy per-graph journal date format. Decoded for the one-time migration
+    /// to app preferences, but deliberately no longer encoded - the format is a
+    /// viewing choice, so two windows must not render one date two ways.
+    public var legacyDateFormat: JournalDateFormat = .default
     /// Legacy per-graph appearance value. Decoded for the one-time migration to
     /// app preferences, but deliberately no longer encoded.
     public var legacyTheme: String = "system"
@@ -27,12 +29,13 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case favourites, favouriteTags, dateFormat, rightPanes, rightPaneFraction
+        case favourites, favouriteTags, rightPanes, rightPaneFraction
         case allPagesCollapsedSections
         case legacyTheme = "theme"
+        case legacyDateFormat = "dateFormat"
     }
 
-    static let legacyOnlyCodingKeys: Set<CodingKeys> = [.legacyTheme]
+    static let legacyOnlyCodingKeys: Set<CodingKeys> = [.legacyTheme, .legacyDateFormat]
 
     // Decode field-by-field so older config files (predating a field) still
     // load with defaults instead of failing the whole decode.
@@ -40,11 +43,11 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         favourites = try c.decodeIfPresent([String].self, forKey: .favourites) ?? []
         favouriteTags = try c.decodeIfPresent([String].self, forKey: .favouriteTags) ?? []
-        if let decodedFormat = try? c.decode(JournalDateFormat.self, forKey: .dateFormat),
+        if let decodedFormat = try? c.decode(JournalDateFormat.self, forKey: .legacyDateFormat),
            decodedFormat.validationError == nil {
-            dateFormat = decodedFormat
+            legacyDateFormat = decodedFormat
         } else {
-            dateFormat = .default
+            legacyDateFormat = .default
         }
         legacyTheme = try c.decodeIfPresent(String.self, forKey: .legacyTheme) ?? "system"
         rightPanes = try c.decodeIfPresent([String].self, forKey: .rightPanes) ?? []
@@ -57,7 +60,6 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(favourites, forKey: .favourites)
         try c.encode(favouriteTags, forKey: .favouriteTags)
-        try c.encode(dateFormat, forKey: .dateFormat)
         try c.encode(rightPanes, forKey: .rightPanes)
         try c.encodeIfPresent(rightPaneFraction, forKey: .rightPaneFraction)
         try c.encode(allPagesCollapsedSections, forKey: .allPagesCollapsedSections)

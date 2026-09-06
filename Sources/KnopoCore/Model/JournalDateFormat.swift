@@ -1,6 +1,7 @@
 import Foundation
 
-/// A journal-title display pattern stored in `.knopo/config.json`.
+/// A journal-title display pattern. App-wide: the app layer persists it in user
+/// preferences, and `GraphConfig` only decodes the legacy per-graph value.
 ///
 /// Patterns use `DateFormatter`'s Unicode syntax plus Knopo's English-only
 /// `{ordinal}` extension immediately after a day field, for example

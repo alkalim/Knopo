@@ -13,6 +13,13 @@ struct PreferencesTests {
         return defaults
     }
 
+    private func writeConfig(at root: URL, dateFormat: String) throws {
+        let url = root.appendingPathComponent(".knopo/config.json")
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{ \"dateFormat\": \"\(dateFormat)\" }".utf8).write(to: url)
+    }
+
     @Test func defaultsAndStoredBounds() {
         let empty = Preferences(defaults: defaults(), syncsRenderer: false)
         #expect(empty.theme == .system)
@@ -61,47 +68,53 @@ struct PreferencesTests {
         #expect(restored.density == 1.3)
     }
 
-    @Test func firstOpenCopiesDefaultDateFormatWithoutChangingExistingGraphs() throws {
-        let store = defaults()
-        let preferences = Preferences(defaults: store, syncsRenderer: false)
-        preferences.defaultDateFormat = JournalDateFormat(pattern: "yyyy/MM/dd")
+    /// The old per-graph format is imported once - by the first graph opened that
+    /// carries one - and never written back to any config.json.
+    @Test func firstGraphOpenedMigratesItsDateFormatIntoPreferences() throws {
+        let preferences = Preferences(defaults: defaults(), syncsRenderer: false)
         let manager = GraphManager(preferences: preferences)
 
-        let newRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("knopo-new-settings-\(UUID().uuidString)")
-        let existingRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("knopo-existing-settings-\(UUID().uuidString)")
+        let firstRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-migrate-first-\(UUID().uuidString)")
+        let secondRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-migrate-second-\(UUID().uuidString)")
         defer {
-            try? FileManager.default.removeItem(at: newRoot)
-            try? FileManager.default.removeItem(at: existingRoot)
+            try? FileManager.default.removeItem(at: firstRoot)
+            try? FileManager.default.removeItem(at: secondRoot)
         }
 
-        let newApp = try manager.acquire(newRoot)
-        #expect(newApp.store.config.dateFormat.pattern == "yyyy/MM/dd")
-        #expect(FileManager.default.fileExists(
-            atPath: newRoot.appendingPathComponent(".knopo/config.json").path))
+        // Written as raw JSON: `dateFormat` is decode-only now, so a GraphConfig
+        // round-trip could not produce the file an older Knopo left behind.
+        try writeConfig(at: firstRoot, dateFormat: "d MMM yyyy")
+        _ = try manager.acquire(firstRoot)
+        #expect(preferences.defaultDateFormat.pattern == "d MMM yyyy")
 
-        var existing = GraphConfig()
-        existing.dateFormat = JournalDateFormat(pattern: "d MMM yyyy")
-        try existing.save(to: existingRoot.appendingPathComponent(".knopo/config.json"))
-        let existingApp = try manager.acquire(existingRoot)
-        #expect(existingApp.store.config.dateFormat.pattern == "d MMM yyyy")
+        // Second graph, different legacy value: the first one already won.
+        try writeConfig(at: secondRoot, dateFormat: "yyyy/MM/dd")
+        let secondApp = try manager.acquire(secondRoot)
+        #expect(preferences.defaultDateFormat.pattern == "d MMM yyyy")
+
+        // And the key stops being written: saving drops it from both graphs.
+        try secondApp.store.updateConfig { $0.favourites = ["Home"] }
+        let saved = try String(contentsOf: secondApp.store.configURL, encoding: .utf8)
+        #expect(!saved.contains("dateFormat"))
     }
 
-    @Test func graphDateUpdatePersistsAndInvalidatesViews() throws {
+    @Test func dateFormatChangePersistsAndInvalidatesViews() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("knopo-graph-format-\(UUID().uuidString)")
+            .appendingPathComponent("knopo-format-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        let preferences = Preferences(defaults: defaults(), syncsRenderer: false)
+        let store = defaults()
+        let preferences = Preferences(defaults: store, syncsRenderer: false)
         let app = AppState(store: try GraphStore(root: root), preferences: preferences)
         let before = app.dataVersion
 
-        try app.updateJournalDateFormat(JournalDateFormat(pattern: "yyyy-MM-dd"))
+        preferences.defaultDateFormat = JournalDateFormat(pattern: "yyyy-MM-dd")
 
-        #expect(app.store.config.dateFormat.pattern == "yyyy-MM-dd")
+        #expect(app.journalDateFormat.pattern == "yyyy-MM-dd")
         #expect(app.dataVersion == before + 1)
         #expect(app.displayTitle(for: "2026-06-10") == "2026-06-10")
-        #expect(GraphConfig.load(from: app.store.configURL).dateFormat.pattern == "yyyy-MM-dd")
+        #expect(store.string(forKey: Preferences.defaultDateFormatKey) == "yyyy-MM-dd")
     }
 
     @Test func rebuildPrunesFavouritesForDeletedPages() async throws {
