@@ -1,0 +1,42 @@
+name: Check
+
+# Runs on every push and PR. build-app.yml only fires on a tag, so this is the
+# job that keeps Localization/keys.txt honest as strings change.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      # Also plutil -lints every .strings/.stringsdict: one syntax error takes
+      # out a whole table, not one line.
+      - name: Tests
+        run: ./scripts/test.sh
+
+      # Fails when a user-facing string was added, reworded or removed without
+      # ./scripts/l10n-extract.sh --update. Also cross-checks plural entries
+      # against the extracted keys, rejects a key carrying two different
+      # comments, and rejects a translation key that matches nothing.
+      - name: Localization coverage
+        run: ./scripts/l10n-extract.sh
+
+      # The gates above all pass if build-app.sh stops shipping the resources,
+      # so check the bundle itself. Debug reuses the build the tests just made.
+      - name: App bundle carries the localizations
+        run: |
+          VERSION=ci ./scripts/build-app.sh debug
+          for lproj in Localization/*.lproj; do
+            test -d "build/Knopo.app/Contents/Resources/$(basename "$lproj")"
+          done
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDevelopmentRegion" \
+            build/Knopo.app/Contents/Info.plist
+          codesign --verify --deep build/Knopo.app
