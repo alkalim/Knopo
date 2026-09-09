@@ -14,17 +14,32 @@ struct JournalView: View {
         // the visible days, so a long history stays cheap on both axes.
         let days = app.journalDays()
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(days, id: \.self) { day in
-                    JournalDaySection(day: day)
-                    // More room above the separator (between the day's last
-                    // block and the rule) than below it, so the rule reads as
-                    // introducing the next day rather than crowding this one.
-                    Divider().padding(.top, 36).padding(.bottom, 16)
+            VStack(alignment: .leading, spacing: 0) {
+                // Today is built even when scrolled off: `⌘J` puts the caret in
+                // its writing block from anywhere in the feed (§10), and only an
+                // outline that exists can take that request.
+                if let today = days.first { JournalDay(day: today) }
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(days.dropFirst(), id: \.self) { day in
+                        JournalDay(day: day)
+                    }
                 }
             }
             .padding(20)
         }
+    }
+}
+
+/// One day in the feed, with the rule that introduces the next.
+private struct JournalDay: View {
+    let day: String
+
+    var body: some View {
+        JournalDaySection(day: day)
+        // More room above the separator (between the day's last block and the
+        // rule) than below it, so the rule reads as introducing the next day
+        // rather than crowding this one.
+        Divider().padding(.top, 36).padding(.bottom, 16)
     }
 }
 

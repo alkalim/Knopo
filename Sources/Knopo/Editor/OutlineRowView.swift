@@ -223,6 +223,12 @@ final class OutlineRowCell: NSTableCellView {
         if editor.superview !== container {
             editor.removeFromSuperview()
             container.addSubview(editor)
+            // Re-parenting stops the caret's blink, and a move is none of the
+            // things AppKit restarts it for (focus, text, selection). Newly
+            // inserted rows get their cell after the editor is already in one.
+            if editor.window?.firstResponder === editor {
+                editor.updateInsertionPointStateAndRestartTimer(true)
+            }
         }
         editor.frame = container.bounds
         editor.autoresizingMask = [.width, .height]

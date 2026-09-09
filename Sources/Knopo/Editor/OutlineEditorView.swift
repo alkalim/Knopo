@@ -281,6 +281,11 @@ final class OutlineEditorController: NSObject {
     /// past which the layout is the user's again.
     private struct Reveal {
         let blockID: UUID
+        /// Whether to flash the row on arrival - a caret is its own answer.
+        let flashes: Bool
+        /// Whether to bring what precedes the row along with it: a caret to write
+        /// at belongs at the foot of the view, a clicked result wherever it lands.
+        let showsRunUp: Bool
         /// Where the row sat when it was last scrolled to; nil before the first.
         var rowMinY: CGFloat?
         /// After this the layout is the user's again — an edit or a window resize
@@ -634,8 +639,9 @@ final class OutlineEditorController: NSObject {
     ///   however many times it is asked for, and may take the caret from another
     ///   day in the feed — which the automatic path must never do.
     private func focusForWritingIfNeeded(explicit: Bool = false) {
-        // Already writing here: nothing to ask for.
-        guard focusedBlockID == nil else { return }
+        // Already writing here: nothing for the automatic path to ask for, but
+        // `⌘J` still moves the caret to the writing block, every press (§10).
+        guard explicit || focusedBlockID == nil else { return }
         // Otherwise once per presentation: `present` runs on every data change,
         // and re-focusing would yank the caret back after a click elsewhere.
         guard explicit || autoFocusedPresentation != presentationKey else { return }
@@ -668,8 +674,8 @@ final class OutlineEditorController: NSObject {
         // Deferred for the same reason as the hook above — the table has to be
         // laid out and in a window before the editor can take first responder.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.focusedBlockID == nil,
-                  explicit || self.mayTakeFocus else { return }
+            guard let self,
+                  explicit || (self.focusedBlockID == nil && self.mayTakeFocus) else { return }
             switch intent {
             case .focus(let id):
                 guard self.rows.contains(where: { $0.block.id == id }) else { return }
@@ -728,22 +734,12 @@ final class OutlineEditorController: NSObject {
         return block.id
     }
 
-    /// Scrolls a programmatically focused block into view. Focusing doesn't scroll
-    /// on its own, and today's journal is easily taller than the window — so the
-    /// caret would land below the fold and `⌘J` would look like it did nothing.
-    /// A row of margin below it keeps the caret off the very edge.
+    /// Scrolls a programmatically focused block into view, at the foot of it with
+    /// the day above. A standing request, not one scroll: the row grows to fit the
+    /// editor and the feed re-measures after, each pass putting the offset back.
+    /// Its window is short, so it stops fighting the reader's own scrolling.
     private func revealFocusedRow(_ id: UUID) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  let row = self.rows.firstIndex(where: { $0.block.id == id }) else { return }
-            // The focused row is taller than its rendered form (it holds the
-            // editor), so let the table finish laying out before measuring it.
-            self.tableView.layoutSubtreeIfNeeded()
-            self.tableView.scrollRowToVisible(row)
-            var withMargin = self.tableView.rect(ofRow: row)
-            withMargin.size.height += OutlineRowCell.minRowHeight
-            self.tableView.scrollToVisible(withMargin)
-        }
+        requestReveal(of: id, flash: false, runUp: true, within: 0.5)
     }
 
     /// Adds the trailing block today's journal opens into. Deliberately *not* a
@@ -825,9 +821,10 @@ final class OutlineEditorController: NSObject {
     /// Asks for a block to be scrolled to and flashed: as soon as the geometry means
     /// something, and again after each re-measure that moves the row, until the
     /// layout settles.
-    private func requestReveal(of blockID: UUID) {
-        revealRequest = Reveal(blockID: blockID, rowMinY: nil,
-                               until: CACurrentMediaTime() + 2)
+    private func requestReveal(of blockID: UUID, flash: Bool = true,
+                               runUp: Bool = false, within window: TimeInterval = 2) {
+        revealRequest = Reveal(blockID: blockID, flashes: flash, showsRunUp: runUp,
+                               rowMinY: nil, until: CACurrentMediaTime() + window)
         revealIfPossible()
     }
 
@@ -868,9 +865,20 @@ final class OutlineEditorController: NSObject {
         var target = tableView.rect(ofRow: row)
         target.origin.y -= topOverlap + margin
         target.size.height += topOverlap + margin * 2
+        if request.showsRunUp {
+            // Grown upwards to a windowful, so the row lands at the foot of the
+            // view and a day that fits stops against the top of the feed. The
+            // window's height, not this table's, which is shorter than it.
+            let windowful = tableView.enclosingScrollView?.documentVisibleRect.height
+                ?? tableView.visibleRect.height
+            let runUp = max(0, windowful - target.height)
+            target.origin.y -= runUp
+            target.size.height += runUp
+        }
         tableView.scrollToVisible(target)
         tableView.layoutSubtreeIfNeeded()
         revealRequest?.rowMinY = tableView.rect(ofRow: row).minY
+        guard request.flashes else { return }
         guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
             as? OutlineRowCell else { return }
         // Cells are reused, so a flash still running on another row goes out first —
