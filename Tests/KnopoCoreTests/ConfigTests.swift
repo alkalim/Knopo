@@ -58,9 +58,9 @@ import Foundation
         try Data(json.utf8).write(to: input)
 
         let loaded = GraphConfig.load(from: input)
-        // `MMM d'th', yyyy` is not a format Knopo writes, so it normalizes away;
-        // both legacy keys survive the decode and neither is written back.
-        expectEqual(loaded.legacyDateFormat, .default)
+        // `MMM d'th', yyyy` normalizes to the pattern it always meant; both
+        // legacy keys survive the decode and neither is written back.
+        expectEqual(loaded.legacyDateFormat.customPattern, "MMM d{ordinal}, yyyy")
         expectEqual(loaded.legacyTheme, "dark")
         try loaded.save(to: output)
         let saved = try String(contentsOf: output, encoding: .utf8)

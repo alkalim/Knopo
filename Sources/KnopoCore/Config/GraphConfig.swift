@@ -43,8 +43,8 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         favourites = try c.decodeIfPresent([String].self, forKey: .favourites) ?? []
         favouriteTags = try c.decodeIfPresent([String].self, forKey: .favouriteTags) ?? []
-        if let decodedFormat = try? c.decode(JournalDateFormat.self, forKey: .legacyDateFormat),
-           decodedFormat.validationError == nil {
+        if let raw = try? c.decode(String.self, forKey: .legacyDateFormat),
+           let decodedFormat = JournalDateFormat(validating: raw) {
             legacyDateFormat = decodedFormat
         } else {
             legacyDateFormat = .default

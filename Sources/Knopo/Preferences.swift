@@ -63,7 +63,7 @@ final class Preferences: ObservableObject {
     @Published var defaultDateFormat: JournalDateFormat {
         didSet {
             guard defaultDateFormat != oldValue else { return }
-            defaults.set(defaultDateFormat.pattern, forKey: Self.defaultDateFormatKey)
+            defaults.set(defaultDateFormat.rawValue, forKey: Self.defaultDateFormatKey)
             dateFormatWasSet = true
             if syncsRenderer { BlockRenderer.journalDateFormat = defaultDateFormat }
             renderRevision += 1
@@ -137,7 +137,7 @@ final class Preferences: ObservableObject {
         defaultDateFormat = legacyValue
         // Assigning the value it already holds skips didSet, so record the
         // migration explicitly.
-        defaults.set(defaultDateFormat.pattern, forKey: Self.defaultDateFormatKey)
+        defaults.set(defaultDateFormat.rawValue, forKey: Self.defaultDateFormatKey)
         dateFormatWasSet = true
         if syncsRenderer { BlockRenderer.journalDateFormat = defaultDateFormat }
     }

@@ -42,6 +42,10 @@ public struct JournalDate: Equatable, Hashable, Comparable, Sendable {
     /// Parses the display form `Jun 10th, 2026` (also Logseq's default journal
     /// reference format) back to its date. Month is case-insensitive and may be
     /// abbreviated or full; the ordinal suffix and comma are optional.
+    ///
+    /// **Stays English whatever the UI language.** This reads a foreign file
+    /// format - what Logseq writes into note text - in the same category as
+    /// `2026_06_10`, not the user's display setting.
     static func parseFriendly(_ s: String) -> (year: Int, month: Int, day: Int)? {
         let months = ["jan", "feb", "mar", "apr", "may", "jun",
                       "jul", "aug", "sep", "oct", "nov", "dec"]
@@ -72,11 +76,13 @@ public struct JournalDate: Equatable, Hashable, Comparable, Sendable {
         String(format: "%04d-%02d-%02d", year, month, day)
     }
 
-    public func displayName(using format: JournalDateFormat) -> String {
-        format.string(from: self)
+    public func displayName(using format: JournalDateFormat, locale: Locale = .current) -> String {
+        format.string(from: self, locale: locale)
     }
 
-    public static func ordinalSuffix(_ n: Int) -> String {
+    /// English ordinal suffix, for `parseFriendly`'s format only. Display goes
+    /// through `JournalDateFormat`, which asks Foundation for the locale's own.
+    static func ordinalSuffix(_ n: Int) -> String {
         let tens = n % 100
         if (11...13).contains(tens) { return "th" }
         switch n % 10 {

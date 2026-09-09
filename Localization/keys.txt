@@ -12,6 +12,7 @@ Medium	Body font weight
 %lld blocks are referenced in %lld places. Delete anyway?	Delete-block confirmation; both counts are pluralized
 %lld of %lld	Find bar: which match of how many is selected
 A page named “%@” already exists	Error alert; the placeholder is the page name
+Abbreviated	Journal date format: shortened month name, Jun 10, 2026
 Actual Size
 Add to Favourites
 All Pages	Sidebar section and window title: the page list
@@ -25,6 +26,7 @@ Cancel
 Choose a graph folder (or create a new one). It will hold your pages as Markdown files.	Open-graph file picker explanation
 Close All Right Panes
 Close Other Panes
+Close the quoted literal in the date format.	Custom journal date pattern: an apostrophe was left open
 Collapsed
 Copy
 Copy %lld Blocks	Block context menu, multi-selection
@@ -46,6 +48,7 @@ Delete “%@”?	Confirmation title; the placeholder is the page name
 Delete…
 Done
 Double-click to edit in place; click links to navigate
+Enter a date format.	Custom journal date pattern: the field is blank
 Enter a new name for #%@.	Rename-tag prompt; placeholder is the tag name
 Enter a new name for “%@”.	Rename-page prompt; placeholder is the page name
 Example: %@
@@ -67,6 +70,7 @@ Graph Settings…
 Gray	Block background color
 Green	Block background color
 How journal titles are displayed, in every graph. Markdown filenames and links always use the canonical format and remain unchanged.
+ISO 8601	Journal date format: 2026-06-10, the same form as the filename
 Increase Line Spacing
 Index size
 Insert
@@ -79,6 +83,7 @@ Label	Link panel: the link's visible text
 Light	Appearance theme
 Link
 Linked References
+Long	Journal date format: full month name, June 10, 2026
 Look Up “%@”	Text menu; the placeholder is the selected text
 New Page
 New Tab
@@ -91,6 +96,7 @@ No page named “%@”	Error alert; the placeholder is the page name
 No results
 No unlinked references.
 None	Background-color submenu: clears the color
+Numeric	Journal date format: digits only, 6/10/2026
 OK
 Open Graph
 Open Graph…
@@ -101,6 +107,7 @@ Orange	Block background color
 Page name
 Paste
 Pink	Block background color
+Place {ordinal} immediately after d.	Custom journal date pattern. {ordinal} and d are literal syntax - do not translate them
 Previous (⇧⌘G) / Next (⌘G)
 Previous match
 Purple	Block background color
@@ -126,9 +133,12 @@ Start typing, or / for commands	Placeholder in the only, empty block of a page
 System	Appearance theme
 Tag view — generated, read-only. Tags are labels, not pages.
 Tags
+That name belongs to a built-in format.	Custom journal date pattern: it spells a built-in style's name
 The file moves to the Trash. Links to this page become stubs. %lld block references into this page will break.	Delete-page confirmation body; the count clause disappears at zero
 The index is rebuilt from the Markdown files. Recent pages are preserved.
+The only supported placeholder is {ordinal}.	Custom journal date pattern. {ordinal} is literal syntax - do not translate it
 Theme
+This date format produces no text.	Custom journal date pattern: valid syntax, but renders nothing
 Today
 Today's Journal
 Type to search
@@ -139,8 +149,9 @@ Unfavourite
 Unicode date pattern
 Unknown error
 Unlinked References
+Use {ordinal} at most once.	Custom journal date pattern. {ordinal} is literal syntax - do not translate it
 Use “/” for namespaces, e.g. Projects/Outliner
-Uses Unicode date patterns. Add {ordinal} immediately after d for English st/nd/rd/th.
+Uses Unicode date patterns. Add {ordinal} immediately after d for an ordinal day, where the language has one.	Help under the custom journal date field. {ordinal} and d are literal syntax - do not translate them. The surrounding explanation should be translated
 Yellow	Block background color
 Zoom In
 Zoom Out

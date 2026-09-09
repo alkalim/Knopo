@@ -50,13 +50,15 @@ public struct PageDocument: Identifiable, Sendable {
     }
 
     /// `title::` overrides the display name. (SPEC §4.2)
-    public func displayTitle(using dateFormat: JournalDateFormat) -> String {
+    public func displayTitle(
+        using dateFormat: JournalDateFormat, locale: Locale = .current
+    ) -> String {
         if let t = pageProperties.first(where: { $0.key == "title" })?.value,
            !t.isEmpty {
             return t
         }
         if isJournal, let date = JournalDate(pageName: name) {
-            return date.displayName(using: dateFormat)
+            return date.displayName(using: dateFormat, locale: locale)
         }
         return name
     }

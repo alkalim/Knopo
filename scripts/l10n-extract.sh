@@ -236,11 +236,11 @@ for lproj in sorted(glob.glob("Localization/*.lproj")):
                 else " - reads as English until it is added"
             print(f"  {lproj}/{table}: no plural entry for {k!r}{note}")
 
-        if reference:
-            # A new counting string is a nudge, not a failure: only a person can
-            # say whether its number needs plural rules.
+        # Only while re-baselining: a reminder on every check run is noise, but
+        # `--update` is exactly when someone has just added a counting string.
+        if reference and mode == "--update":
             for k in sorted({k for k in table_keys if "%lld" in k} - required[table]):
-                print(f"  note: {k!r} has a count but no plural rules - add them to "
+                print(f"  note: {k!r} counts something but has no plural rules - add them to "
                       f"{lproj}/{table}.stringsdict if the wording changes with the number")
 
         if orphans or both or (reference and missing_plurals):

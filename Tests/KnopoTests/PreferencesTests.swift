@@ -55,7 +55,7 @@ struct PreferencesTests {
         preferences.migrateThemeIfNeeded(from: "light")
         preferences.contentWeight = .heavy
         preferences.showPageRefBrackets = true
-        preferences.defaultDateFormat = JournalDateFormat(pattern: "yyyy-MM-dd")
+        preferences.defaultDateFormat = JournalDateFormat(rawValue: "yyyy-MM-dd")
         preferences.zoom = 1.4
         preferences.density = 1.3
 
@@ -63,7 +63,7 @@ struct PreferencesTests {
         #expect(restored.theme == .dark)
         #expect(restored.contentWeight == .heavy)
         #expect(restored.showPageRefBrackets)
-        #expect(restored.defaultDateFormat.pattern == "yyyy-MM-dd")
+        #expect(restored.defaultDateFormat.rawValue == "yyyy-MM-dd")
         #expect(restored.zoom == 1.4)
         #expect(restored.density == 1.3)
     }
@@ -87,12 +87,12 @@ struct PreferencesTests {
         // round-trip could not produce the file an older Knopo left behind.
         try writeConfig(at: firstRoot, dateFormat: "d MMM yyyy")
         _ = try manager.acquire(firstRoot)
-        #expect(preferences.defaultDateFormat.pattern == "d MMM yyyy")
+        #expect(preferences.defaultDateFormat.rawValue == "d MMM yyyy")
 
         // Second graph, different legacy value: the first one already won.
         try writeConfig(at: secondRoot, dateFormat: "yyyy/MM/dd")
         let secondApp = try manager.acquire(secondRoot)
-        #expect(preferences.defaultDateFormat.pattern == "d MMM yyyy")
+        #expect(preferences.defaultDateFormat.rawValue == "d MMM yyyy")
 
         // And the key stops being written: saving drops it from both graphs.
         try secondApp.store.updateConfig { $0.favourites = ["Home"] }
@@ -109,9 +109,9 @@ struct PreferencesTests {
         let app = AppState(store: try GraphStore(root: root), preferences: preferences)
         let before = app.dataVersion
 
-        preferences.defaultDateFormat = JournalDateFormat(pattern: "yyyy-MM-dd")
+        preferences.defaultDateFormat = JournalDateFormat(rawValue: "yyyy-MM-dd")
 
-        #expect(app.journalDateFormat.pattern == "yyyy-MM-dd")
+        #expect(app.journalDateFormat.rawValue == "yyyy-MM-dd")
         #expect(app.dataVersion == before + 1)
         #expect(app.displayTitle(for: "2026-06-10") == "2026-06-10")
         #expect(store.string(forKey: Preferences.defaultDateFormatKey) == "yyyy-MM-dd")

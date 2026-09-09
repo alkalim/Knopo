@@ -324,7 +324,7 @@ import Foundation
         expectEqual(journals.map(\.nameKey), ["2026-06-11", "2026-06-10"])
         expectEqual(try store.cache.backlinks(of: "2026-06-11").count, 1)
         expectEqual(
-            store.page(named: "2026-06-10").displayTitle(using: .default),
+            store.page(named: "2026-06-10").displayTitle(using: JournalDateFormat(rawValue: "MMM d{ordinal}, yyyy"), locale: Locale(identifier: "en_US")),
             "Jun 10th, 2026")
     }
 
@@ -345,7 +345,7 @@ import Foundation
         let day = store.page(named: "2026-06-10")
         expectTrue(day.fileExists)
         expectEqual(day.blocks.first?.content, "the imported day")
-        expectEqual(day.displayTitle(using: .default), "Jun 10th, 2026")
+        expectEqual(day.displayTitle(using: JournalDateFormat(rawValue: "MMM d{ordinal}, yyyy"), locale: Locale(identifier: "en_US")), "Jun 10th, 2026")
         // No stub created for the ISO spelling.
         expectEqual(try store.cache.stubPageNames(), [])
     }

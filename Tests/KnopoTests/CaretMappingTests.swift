@@ -10,10 +10,15 @@ import KnopoCore
 @MainActor
 @Suite struct CaretMappingTests {
 
+    /// The date-ref test below asserts on rendered English, so both the format
+    /// and the locale are pinned: `.default` is a semantic style now, and would
+    /// otherwise follow whatever region the machine is set to.
     private func render(_ content: String) -> NSAttributedString {
         BlockRenderer.render(
             content: content,
-            context: BlockRenderer.Context(journalDateFormat: .default))
+            context: BlockRenderer.Context(
+                journalDateFormat: JournalDateFormat(rawValue: "MMM d{ordinal}, yyyy"),
+                journalLocale: Locale(identifier: "en_US")))
     }
 
     /// Source offset for the rendered index of `needle`'s first character.

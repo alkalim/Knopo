@@ -160,6 +160,9 @@ struct GraphSettingsView: View {
 /// Presets plus a validated custom Unicode pattern.
 private struct JournalDateFormatControl: View {
     private static let customTag = "__custom__"
+    /// Prefilled when switching to Custom from a built-in style, so the field
+    /// starts from something valid rather than empty.
+    private static let customSeed = "MMM d{ordinal}, yyyy"
 
     let title: LocalizedStringKey
     let format: JournalDateFormat
@@ -182,8 +185,8 @@ private struct JournalDateFormatControl: View {
         self.explanation = explanation
         self.onChange = onChange
         let isPreset = JournalDateFormat.presets.contains(format)
-        _selection = State(initialValue: isPreset ? format.pattern : Self.customTag)
-        _customDraft = State(initialValue: format.pattern)
+        _selection = State(initialValue: isPreset ? format.rawValue : Self.customTag)
+        _customDraft = State(initialValue: format.customPattern ?? Self.customSeed)
     }
 
     var body: some View {
@@ -191,18 +194,18 @@ private struct JournalDateFormatControl: View {
         VStack(alignment: .leading, spacing: 8) {
             Picker(title, selection: $selection) {
                 ForEach(JournalDateFormat.presets, id: \.self) { preset in
-                    Text(preset.string(from: sample)).tag(preset.pattern)
+                    Text(verbatim: Self.label(for: preset, on: sample)).tag(preset.rawValue)
                 }
                 Divider()
                 Text("Custom…").tag(Self.customTag)
             }
             .onChange(of: selection) { _, value in
                 guard value != Self.customTag else {
-                    customDraft = format.pattern
+                    customDraft = format.customPattern ?? Self.customSeed
                     return
                 }
                 customFocused = false
-                applyValid(JournalDateFormat(pattern: value))
+                applyValid(JournalDateFormat(rawValue: value))
             }
             .onChange(of: format) { _, value in
                 if lastApplied == value {
@@ -211,27 +214,27 @@ private struct JournalDateFormatControl: View {
                 }
                 lastApplied = nil
                 selection = JournalDateFormat.presets.contains(value)
-                    ? value.pattern : Self.customTag
-                customDraft = value.pattern
+                    ? value.rawValue : Self.customTag
+                customDraft = value.customPattern ?? Self.customSeed
             }
 
             if selection == Self.customTag {
-                let candidate = JournalDateFormat(pattern: customDraft)
-                let validationError = candidate.validationError
+                let candidate = JournalDateFormat(rawValue: customDraft)
+                let problem = JournalDateFormat.problem(withPattern: customDraft)
                 TextField("Unicode date pattern", text: $customDraft)
                     .focused($customFocused)
                     .onSubmit(commitCustomDraft)
                     .onChange(of: customFocused) { wasFocused, isFocused in
                         if wasFocused && !isFocused { commitCustomDraft() }
                     }
-                if let error = validationError {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                if let problem {
+                    Text(Self.message(for: problem)).font(.caption).foregroundStyle(.red)
                 } else {
                     Text("Example: \(candidate.string(from: sample))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("Uses Unicode date patterns. Add {ordinal} immediately after d for English st/nd/rd/th.")
+                Text(Self.patternHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -246,13 +249,82 @@ private struct JournalDateFormatControl: View {
 
     private func commitCustomDraft() {
         guard selection == Self.customTag else { return }
-        let candidate = JournalDateFormat(pattern: customDraft)
-        guard candidate.validationError == nil else { return }
-        applyValid(candidate)
+        guard JournalDateFormat.problem(withPattern: customDraft) == nil else { return }
+        applyValid(JournalDateFormat(rawValue: customDraft))
     }
 
     private func applyValid(_ candidate: JournalDateFormat) {
         lastApplied = candidate
         onChange(candidate)
+    }
+
+    /// The style's own name, ahead of today's date in that style. The name is
+    /// load-bearing: two styles can render identically - German abbreviates June
+    /// as "Juni" either way, and Japanese never differs - so the example alone
+    /// would hide a choice that matters in other months.
+    private static func label(for format: JournalDateFormat, on sample: JournalDate) -> String {
+        let example = format.string(from: sample)
+        guard let style = format.style else { return example }
+        return "\(name(for: style)) - \(example)"
+    }
+
+    private static var patternHelp: String {
+        String(
+            localized: "Uses Unicode date patterns. Add {ordinal} immediately after d for an ordinal day, where the language has one.",
+            comment: "Help under the custom journal date field. {ordinal} and d are literal syntax - do not translate them. The surrounding explanation should be translated")
+    }
+
+    private static func name(for style: JournalDateFormat.Style) -> String {
+        switch style {
+        case .abbreviated:
+            return String(localized: "Abbreviated",
+                          comment: "Journal date format: shortened month name, Jun 10, 2026")
+        case .long:
+            return String(localized: "Long",
+                          comment: "Journal date format: full month name, June 10, 2026")
+        case .numeric:
+            return String(localized: "Numeric",
+                          comment: "Journal date format: digits only, 6/10/2026")
+        case .iso:
+            return String(localized: "ISO 8601",
+                          comment: "Journal date format: 2026-06-10, the same form as the filename")
+        }
+    }
+
+    /// KnopoCore names the problem; the wording lives here, so the engine needs
+    /// no bundle of its own (workdocs/design/localization.md, 1e).
+    ///
+    /// `{ordinal}` and `d` are literal pattern syntax the validator matches on,
+    /// so each comment says not to translate them.
+    private static func message(for problem: JournalDateFormat.PatternProblem) -> String {
+        switch problem {
+        case .empty:
+            return String(localized: "Enter a date format.",
+                          comment: "Custom journal date pattern: the field is blank")
+        case .reservedName:
+            return String(
+                localized: "That name belongs to a built-in format.",
+                comment: "Custom journal date pattern: it spells a built-in style's name")
+        case .repeatedOrdinal:
+            return String(
+                localized: "Use {ordinal} at most once.",
+                comment: "Custom journal date pattern. {ordinal} is literal syntax - do not translate it")
+        case .unknownPlaceholder:
+            return String(
+                localized: "The only supported placeholder is {ordinal}.",
+                comment: "Custom journal date pattern. {ordinal} is literal syntax - do not translate it")
+        case .ordinalNotAfterDay:
+            return String(
+                localized: "Place {ordinal} immediately after d.",
+                comment: "Custom journal date pattern. {ordinal} and d are literal syntax - do not translate them")
+        case .unbalancedQuote:
+            return String(
+                localized: "Close the quoted literal in the date format.",
+                comment: "Custom journal date pattern: an apostrophe was left open")
+        case .producesNoText:
+            return String(
+                localized: "This date format produces no text.",
+                comment: "Custom journal date pattern: valid syntax, but renders nothing")
+        }
     }
 }

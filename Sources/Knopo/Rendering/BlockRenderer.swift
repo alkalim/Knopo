@@ -26,6 +26,9 @@ enum BlockRenderer {
         /// Journal-title format. Defaults to the app-wide preference so every
         /// render site honours it; passed explicitly only by tests.
         var journalDateFormat: JournalDateFormat
+        /// The locale the built-in date styles render in. A test pins it; the
+        /// app always wants the user's.
+        var journalLocale: Locale = .current
         /// Whether to draw faint `[[ ]]` around page references. Defaults to
         /// the user's stored preference so every render site honours it.
         var pageRefBrackets: Bool = BlockRenderer.bracketsEnabled
@@ -60,6 +63,7 @@ enum BlockRenderer {
              inlineQuoteBar: Bool = true,
              pageDisplayTitle: ((String) -> String?)? = nil,
              journalDateFormat: JournalDateFormat = BlockRenderer.journalDateFormat,
+             journalLocale: Locale = .current,
              pageRefBrackets: Bool = BlockRenderer.bracketsEnabled,
              resolveEmbed: @escaping (EmbedTarget) -> NSAttributedString? = { _ in nil },
              resolveQuery: @escaping (QueryExpr) -> NSAttributedString? = { _ in nil },
@@ -72,6 +76,7 @@ enum BlockRenderer {
             self.inlineQuoteBar = inlineQuoteBar
             self.pageDisplayTitle = pageDisplayTitle
             self.journalDateFormat = journalDateFormat
+            self.journalLocale = journalLocale
             self.pageRefBrackets = pageRefBrackets
             self.resolveEmbed = resolveEmbed
             self.resolveQuery = resolveQuery
@@ -218,7 +223,8 @@ enum BlockRenderer {
     /// the literal name (stable identity).
     static func pageRefDisplay(_ name: String, context: Context) -> String {
         if let date = JournalDate(pageName: name) {
-            return date.displayName(using: context.journalDateFormat)
+            return date.displayName(
+                using: context.journalDateFormat, locale: context.journalLocale)
         }
         return context.pageDisplayTitle?(name) ?? name
     }
