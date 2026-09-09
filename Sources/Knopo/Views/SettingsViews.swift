@@ -36,7 +36,8 @@ struct GeneralSettingsView: View {
                 JournalDateFormatControl(
                     title: "Date format",
                     format: preferences.defaultDateFormat,
-                    explanation: "How journal titles are displayed, in every graph. Markdown filenames and links always use the canonical format and remain unchanged."
+                    explanation: "How journal titles are displayed, in every graph. Markdown filenames and links always use the canonical format and remain unchanged.",
+                    remembered: $preferences.customDateDraft
                 ) { format in
                     preferences.defaultDateFormat = format
                 }
@@ -167,35 +168,73 @@ struct JournalDateFormatControl: View {
     /// pattern: selecting Custom applies it immediately.
     static let customSeed = "MMM d{ordinal}, yyyy"
 
-    /// The pattern the custom field shows for `format`: its own pattern, or the
-    /// seed when switching over from a built-in style.
-    static func customDraft(from format: JournalDateFormat) -> String {
-        format.customPattern ?? customSeed
+    /// The pattern the custom field shows for `format`: its own pattern, else
+    /// the last one the user typed, else the seed.
+    static func customDraft(from format: JournalDateFormat, remembered: String) -> String {
+        if let own = format.customPattern { return own }
+        return JournalDateFormat.problem(withPattern: remembered) == nil ? remembered : customSeed
+    }
+
+    /// Where a picker selection leads. Extracted from the view because two bugs
+    /// have already hidden in these transitions: entering Custom used to show a
+    /// pattern without applying it, and leaving Custom used to drop it.
+    struct Step: Equatable {
+        /// The format to apply, or nil to leave the active one alone.
+        var apply: JournalDateFormat?
+        /// What the custom field should show.
+        var draft: String
+        /// The pattern to keep for next time, or nil to keep the stored one.
+        var remember: String?
+    }
+
+    static func step(
+        selecting tag: String, draft: String, remembered: String, format: JournalDateFormat
+    ) -> Step {
+        guard tag == customTag else {
+            // Leaving Custom for a built-in style: keep the outgoing draft, but
+            // do not apply it over the style the user just chose. Without this
+            // an edit still inside the commit debounce, or a pattern that came
+            // from preferences, is lost the first time through a style.
+            let keep = JournalDateFormat.problem(withPattern: draft) == nil ? draft : nil
+            return Step(apply: JournalDateFormat(rawValue: tag), draft: draft, remember: keep)
+        }
+        let next = customDraft(from: format, remembered: remembered)
+        guard JournalDateFormat.problem(withPattern: next) == nil else {
+            return Step(apply: nil, draft: next, remember: nil)
+        }
+        return Step(apply: JournalDateFormat(rawValue: next), draft: next, remember: next)
     }
 
     let title: LocalizedStringKey
     let format: JournalDateFormat
     let explanation: LocalizedStringKey
+    /// Survives a trip through the built-in styles, so the user's pattern is
+    /// still there when they come back to Custom.
+    @Binding var remembered: String
     let onChange: (JournalDateFormat) -> Void
 
     @State private var selection: String
     @State private var customDraft: String
     @State private var lastApplied: JournalDateFormat?
+    @State private var commitPending: Task<Void, Never>?
     @FocusState private var customFocused: Bool
 
     init(
         title: LocalizedStringKey,
         format: JournalDateFormat,
         explanation: LocalizedStringKey,
+        remembered: Binding<String>,
         onChange: @escaping (JournalDateFormat) -> Void
     ) {
         self.title = title
         self.format = format
         self.explanation = explanation
+        self._remembered = remembered
         self.onChange = onChange
         let isPreset = JournalDateFormat.presets.contains(format)
         _selection = State(initialValue: isPreset ? format.rawValue : Self.customTag)
-        _customDraft = State(initialValue: Self.customDraft(from: format))
+        _customDraft = State(initialValue: Self.customDraft(
+            from: format, remembered: remembered.wrappedValue))
     }
 
     var body: some View {
@@ -209,19 +248,15 @@ struct JournalDateFormatControl: View {
                 Text("Custom…").tag(Self.customTag)
             }
             .onChange(of: selection) { _, value in
-                guard value != Self.customTag else {
-                    // Apply the drafted pattern straight away. Only showing it
-                    // left the previous style in effect until the field lost
-                    // focus - which never happened if the user never typed.
-                    let draft = Self.customDraft(from: format)
-                    customDraft = draft
-                    if JournalDateFormat.problem(withPattern: draft) == nil {
-                        applyValid(JournalDateFormat(rawValue: draft))
-                    }
-                    return
-                }
-                customFocused = false
-                applyValid(JournalDateFormat(rawValue: value))
+                // A queued typing commit is moot: `step` has the draft already.
+                commitPending?.cancel()
+                let next = Self.step(
+                    selecting: value, draft: customDraft,
+                    remembered: remembered, format: format)
+                customDraft = next.draft
+                if let keep = next.remember { remembered = keep }
+                if value != Self.customTag { customFocused = false }
+                if let apply = next.apply { applyValid(apply) }
             }
             .onChange(of: format) { _, value in
                 if lastApplied == value {
@@ -231,7 +266,7 @@ struct JournalDateFormatControl: View {
                 lastApplied = nil
                 selection = JournalDateFormat.presets.contains(value)
                     ? value.rawValue : Self.customTag
-                customDraft = Self.customDraft(from: value)
+                customDraft = Self.customDraft(from: value, remembered: remembered)
             }
 
             if selection == Self.customTag {
@@ -242,6 +277,17 @@ struct JournalDateFormatControl: View {
                     .onSubmit(commitCustomDraft)
                     .onChange(of: customFocused) { wasFocused, isFocused in
                         if wasFocused && !isFocused { commitCustomDraft() }
+                    }
+                    // Focus loss is not a reliable trigger on macOS - clicking
+                    // inert chrome keeps the field focused - so commit shortly
+                    // after typing stops instead.
+                    .onChange(of: customDraft) { _, _ in
+                        commitPending?.cancel()
+                        commitPending = Task {
+                            try? await Task.sleep(for: .milliseconds(400))
+                            guard !Task.isCancelled else { return }
+                            commitCustomDraft()
+                        }
                     }
                 if let problem {
                     Text(Self.message(for: problem)).font(.caption).foregroundStyle(.red)
@@ -264,8 +310,10 @@ struct JournalDateFormatControl: View {
     }
 
     private func commitCustomDraft() {
+        commitPending?.cancel()
         guard selection == Self.customTag else { return }
         guard JournalDateFormat.problem(withPattern: customDraft) == nil else { return }
+        remembered = customDraft
         applyValid(JournalDateFormat(rawValue: customDraft))
     }
 

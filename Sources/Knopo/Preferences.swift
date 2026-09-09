@@ -25,6 +25,9 @@ final class Preferences: ObservableObject {
 
     static let themeKey = "appearanceTheme"
     static let defaultDateFormatKey = BlockRenderer.journalDateFormatKey
+    /// The last custom date pattern the user typed, kept so switching to a
+    /// built-in style and back does not discard it. Not a render input.
+    static let customDateDraftKey = "journalDateCustomDraft"
 
     private let defaults: UserDefaults
     private let syncsRenderer: Bool
@@ -55,6 +58,13 @@ final class Preferences: ObservableObject {
             defaults.set(showPageRefBrackets, forKey: BlockRenderer.pageRefBracketsKey)
             if syncsRenderer { BlockRenderer.bracketsEnabled = showPageRefBrackets }
             renderRevision += 1
+        }
+    }
+
+    @Published var customDateDraft: String {
+        didSet {
+            guard customDateDraft != oldValue else { return }
+            defaults.set(customDateDraft, forKey: Self.customDateDraftKey)
         }
     }
 
@@ -96,6 +106,7 @@ final class Preferences: ObservableObject {
             rawValue: defaults.string(forKey: BlockRenderer.contentWeightKey) ?? "") ?? .medium
         showPageRefBrackets = defaults.bool(forKey: BlockRenderer.pageRefBracketsKey)
 
+        customDateDraft = defaults.string(forKey: Self.customDateDraftKey) ?? ""
         if let raw = defaults.string(forKey: Self.defaultDateFormatKey),
            let format = JournalDateFormat(validating: raw) {
             defaultDateFormat = format

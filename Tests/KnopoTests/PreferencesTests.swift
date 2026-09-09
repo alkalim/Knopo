@@ -100,6 +100,17 @@ struct PreferencesTests {
         #expect(!saved.contains("dateFormat"))
     }
 
+    @Test func theCustomDatePatternIsRemembered() {
+        let store = defaults()
+        let preferences = Preferences(defaults: store, syncsRenderer: false)
+        #expect(preferences.customDateDraft.isEmpty)
+
+        preferences.customDateDraft = "EEEE, d MMM yyyy"
+        #expect(store.string(forKey: Preferences.customDateDraftKey) == "EEEE, d MMM yyyy")
+        let restored = Preferences(defaults: store, syncsRenderer: false)
+        #expect(restored.customDateDraft == "EEEE, d MMM yyyy")
+    }
+
     @Test func dateFormatChangePersistsAndInvalidatesViews() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-format-\(UUID().uuidString)")
