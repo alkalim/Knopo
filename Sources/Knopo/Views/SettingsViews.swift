@@ -158,11 +158,20 @@ struct GraphSettingsView: View {
 }
 
 /// Presets plus a validated custom Unicode pattern.
-private struct JournalDateFormatControl: View {
+///
+/// Internal, not private, so the seeding rule below can be tested.
+struct JournalDateFormatControl: View {
     private static let customTag = "__custom__"
     /// Prefilled when switching to Custom from a built-in style, so the field
-    /// starts from something valid rather than empty.
-    private static let customSeed = "MMM d{ordinal}, yyyy"
+    /// starts from something valid rather than empty. Must stay a valid
+    /// pattern: selecting Custom applies it immediately.
+    static let customSeed = "MMM d{ordinal}, yyyy"
+
+    /// The pattern the custom field shows for `format`: its own pattern, or the
+    /// seed when switching over from a built-in style.
+    static func customDraft(from format: JournalDateFormat) -> String {
+        format.customPattern ?? customSeed
+    }
 
     let title: LocalizedStringKey
     let format: JournalDateFormat
@@ -186,7 +195,7 @@ private struct JournalDateFormatControl: View {
         self.onChange = onChange
         let isPreset = JournalDateFormat.presets.contains(format)
         _selection = State(initialValue: isPreset ? format.rawValue : Self.customTag)
-        _customDraft = State(initialValue: format.customPattern ?? Self.customSeed)
+        _customDraft = State(initialValue: Self.customDraft(from: format))
     }
 
     var body: some View {
@@ -201,7 +210,14 @@ private struct JournalDateFormatControl: View {
             }
             .onChange(of: selection) { _, value in
                 guard value != Self.customTag else {
-                    customDraft = format.customPattern ?? Self.customSeed
+                    // Apply the drafted pattern straight away. Only showing it
+                    // left the previous style in effect until the field lost
+                    // focus - which never happened if the user never typed.
+                    let draft = Self.customDraft(from: format)
+                    customDraft = draft
+                    if JournalDateFormat.problem(withPattern: draft) == nil {
+                        applyValid(JournalDateFormat(rawValue: draft))
+                    }
                     return
                 }
                 customFocused = false
@@ -215,7 +231,7 @@ private struct JournalDateFormatControl: View {
                 lastApplied = nil
                 selection = JournalDateFormat.presets.contains(value)
                     ? value.rawValue : Self.customTag
-                customDraft = value.customPattern ?? Self.customSeed
+                customDraft = Self.customDraft(from: value)
             }
 
             if selection == Self.customTag {
