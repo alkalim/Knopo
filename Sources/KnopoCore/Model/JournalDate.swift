@@ -72,8 +72,23 @@ public struct JournalDate: Equatable, Hashable, Comparable, Sendable {
     public static func today() -> JournalDate { JournalDate(date: Date()) }
 
     /// The canonical page name: `2026-06-10`.
+    ///
+    /// Hand-padded rather than `String(format:)`, which measured ~1.4 µs and is
+    /// on every page-key, filename, index and journal-reference lookup. Falls
+    /// back for values outside the four-digit range, so the output is identical
+    /// either way.
     public var pageName: String {
-        String(format: "%04d-%02d-%02d", year, month, day)
+        guard (0...9999).contains(year), (1...12).contains(month), (1...31).contains(day) else {
+            return String(format: "%04d-%02d-%02d", year, month, day)
+        }
+        let zero = UInt8(ascii: "0"), dash = UInt8(ascii: "-")
+        let bytes: [UInt8] = [
+            zero + UInt8(year / 1000), zero + UInt8(year / 100 % 10),
+            zero + UInt8(year / 10 % 10), zero + UInt8(year % 10), dash,
+            zero + UInt8(month / 10), zero + UInt8(month % 10), dash,
+            zero + UInt8(day / 10), zero + UInt8(day % 10),
+        ]
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     public func displayName(using format: JournalDateFormat, locale: Locale = .current) -> String {
