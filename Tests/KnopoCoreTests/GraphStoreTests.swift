@@ -3,6 +3,25 @@ import Foundation
 @testable import KnopoCore
 
 @Suite struct GraphStoreTests {
+
+    /// A conflict copy's filename must carry the Gregorian year whatever the
+    /// region's calendar is - a Buddhist calendar would write 2569 (phase 2c).
+    @Test func conflictFilenameStampIsGregorianAndASCII() {
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 6; comps.day = 10
+        comps.hour = 14; comps.minute = 30; comps.second = 5
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        let date = cal.date(from: comps)!
+
+        expectEqual(GraphStore.conflictStamp(for: date), "20260610-143005")
+
+        // What the pin prevents: the same pattern under a Buddhist calendar.
+        let unpinned = DateFormatter()
+        unpinned.locale = Locale(identifier: "th_TH@calendar=buddhist")
+        unpinned.dateFormat = "yyyyMMdd-HHmmss"
+        expectTrue(unpinned.string(from: date).hasPrefix("2569"))
+    }
     /// A save whose serialized text matches what is already on disk must not
     /// rewrite the file: every rewrite is a fresh version on file-versioning
     /// cloud storage, and a whole-page reindex besides.

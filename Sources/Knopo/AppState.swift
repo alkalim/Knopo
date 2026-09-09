@@ -643,18 +643,34 @@ final class AppState: ObservableObject {
 
 /// Match closeness of `query` against `candidate`, case-insensitive; nil if no
 /// match. Lower is closer: 0 exact, 1 prefix, 2 substring, 3 loose subsequence.
+/// Normalizes a page name or query for search: case- *and* accent-insensitive,
+/// and locale-independent so ranking is the same in every region.
+///
+/// Block search folds accents through FTS5's `remove_diacritics 2`, so page-name
+/// search has to fold them too - otherwise `cafe` finds a block mentioning Café
+/// but not the page named Café.
+func searchFolded(_ text: String) -> String {
+    // Folding costs ~5x lowercasing, and page names are usually plain ASCII,
+    // where the two agree. This is on every row of every keystroke.
+    guard text.utf8.contains(where: { $0 >= 0x80 }) else { return text.lowercased() }
+    return text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+}
+
 func matchTier(query: String, in candidate: String) -> Int? {
-    let q = query.lowercased(), c = candidate.lowercased()
+    let q = searchFolded(query), c = searchFolded(candidate)
     if c == q { return 0 }
     if c.hasPrefix(q) { return 1 }
     if c.contains(q) { return 2 }
-    return fuzzyMatch(query: q, in: c) ? 3 : nil
+    return fuzzySubsequence(query: q, in: c) ? 3 : nil
 }
 
-/// Subsequence fuzzy match, case-insensitive.
+/// Subsequence fuzzy match, case- and accent-insensitive.
 func fuzzyMatch(query: String, in candidate: String) -> Bool {
-    let q = query.lowercased()
-    let c = candidate.lowercased()
+    fuzzySubsequence(query: searchFolded(query), in: searchFolded(candidate))
+}
+
+/// The subsequence test itself, on already-folded input.
+private func fuzzySubsequence(query q: String, in c: String) -> Bool {
     var qi = q.startIndex
     for ch in c {
         guard qi < q.endIndex else { return true }

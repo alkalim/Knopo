@@ -580,11 +580,22 @@ public final class GraphStore {
         return affected
     }
 
+    /// Timestamp for a conflict copy's filename.
+    ///
+    /// Pinned to `en_US_POSIX`, which forces Gregorian and ASCII digits: under a
+    /// Thai or Japanese regional calendar an unpinned formatter writes `2569` or
+    /// `0008` as the year, and the file in `.knopo/conflicts/` ends up with a
+    /// nonsense name. Same pin as the pasted-image name in the editor.
+    static func conflictStamp(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: date)
+    }
+
     private func saveConflictCopy(of doc: PageDocument) throws {
         try FileManager.default.createDirectory(at: conflictsDir, withIntermediateDirectories: true)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let stampStr = formatter.string(from: Date())
+        let stampStr = Self.conflictStamp(for: Date())
         let fileName = PageName.fileName(for: doc.name)
             .replacingOccurrences(of: ".md", with: "-\(stampStr).md")
         let text = PageSerializer.serialize(preamble: doc.preamble, blocks: doc.blocks)
