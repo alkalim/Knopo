@@ -35,7 +35,7 @@ final class Navigator: ObservableObject {
     @Published private(set) var focusWritingToken = 0
 
     /// The block an outline should scroll to and flash after it loads (set by
-    /// clicking a query / backlink / tag result). The token bumps on each
+    /// clicking a search / query / backlink / tag result). The token bumps on each
     /// request so editors react and so each outline applies a given request once
     /// (it records the last token it handled) — no shared mutable clearing, so
     /// nothing is written to nav state during a SwiftUI view update.
@@ -140,7 +140,7 @@ final class Navigator: ObservableObject {
 
     /// Open the page holding a block (full page, in context — not zoomed) and
     /// request that the block be scrolled to and flashed. Used by every
-    /// "result" surface (query, backlinks, tag view) so they behave alike.
+    /// "result" surface (search, query, backlinks, tag view) so they behave alike.
     func navigateToBlock(pageName: String, blockID: UUID, content: String, inSidebar: Bool) {
         // Capture the index's preorder position now: the target page is parsed
         // fresh on open, so an un-persisted block's id won't match there, and

@@ -75,6 +75,101 @@ import KnopoCore
         return nil
     }
 
+    /// Opening a search hit is a reading action, today's journal included. Its
+    /// automatic writing focus must not replace the reveal.
+    @Test(arguments: [0, -1])
+    func searchResultKeepsTheJournalBlockHighlighted(dayOffset: Int) async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-journal-search-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        let day = JournalDate.today().adding(days: dayOffset).pageName
+        var doc = store.page(named: day)
+        doc.blocks = (0..<40).map { Block(content: "Journal entry \($0)") }
+        doc.blocks[1].content = "Needle in the journal"
+        store.updatePage(doc)
+        try store.savePage(named: day)
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+        let hit = try #require(store.cache.searchBlocks("Needle", limit: 20).first)
+        nav.navigateToBlock(pageName: hit.pageDisplayName, blockID: hit.blockID,
+                            content: hit.content, inSidebar: false)
+
+        let host = NSHostingView(rootView: PageScreen(pageName: day)
+            .environmentObject(app).environmentObject(nav))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 450),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        for _ in 0..<10 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        // A subsequent presentation must not belatedly take the caret either.
+        app.dataVersion += 1
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        let table = try #require(descendants(host, of: OutlineTableView.self).first)
+        let cell = try #require(table.view(atColumn: 0, row: 1, makeIfNecessary: false)
+            as? OutlineRowCell)
+        #expect(cell.isFlashing)
+        #expect(table.visibleRect.intersects(table.rect(ofRow: 1)))
+        #expect(!(window.firstResponder is BlockEditorTextView))
+        #expect(app.document(for: day).blocks.count == 40)
+    }
+
+    /// Navigation in the whole window. The feed being left may already hold an
+    /// outline for the day being opened.
+    @Test(arguments: [true, false])
+    func searchBetweenJournalPagesHighlightsEachDestination(startInFeed: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-journal-transition-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        let days = (0..<3).map { JournalDate.today().adding(days: -$0).pageName }
+        for day in days {
+            var doc = store.page(named: day)
+            doc.blocks = (0..<8).map { Block(content: "Entry \($0) on \(day)") }
+            doc.blocks[1].content = "Needle on \(day)"
+            store.updatePage(doc)
+            try store.savePage(named: day)
+        }
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+        if !startInFeed { nav.navigate(to: .page(name: days[0])) }
+        let host = NSHostingView(rootView: MainWindow(graphName: "Test", openGraphSettings: {})
+            .environmentObject(app).environmentObject(nav))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        func settle() async throws {
+            for _ in 0..<10 {
+                window.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(30))
+            }
+        }
+        try await settle()
+        for day in [days[1], days[0], days[2], days[1]] {
+            let hit = try #require(store.cache.searchBlocks("Needle", limit: 20)
+                .first { $0.pageDisplayName == day })
+            nav.searchPresented = true
+            try await settle()
+            nav.searchPresented = false
+            nav.navigateToBlock(pageName: hit.pageDisplayName, blockID: hit.blockID,
+                                content: hit.content, inSidebar: false)
+            try await settle()
+            #expect(nav.current == .page(name: day))
+            let table = try #require(descendants(host, of: OutlineTableView.self).first {
+                ($0.delegate as? OutlineEditorController)?.pageName == day
+            })
+            let cell = try #require(table.view(atColumn: 0, row: 1, makeIfNecessary: false)
+                as? OutlineRowCell)
+            #expect(cell.isFlashing, "Destination: \(day), starting in feed: \(startInFeed)")
+            #expect(table.visibleRect.intersects(table.rect(ofRow: 1)))
+        }
+    }
+
     /// A day that fits arrives whole: stopping as soon as the caret's own row is
     /// on screen would push the title and the blocks above it off the top.
     @Test func shortcutShowsTheWholeDayWhenItFits() async throws {

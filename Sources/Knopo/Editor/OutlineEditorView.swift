@@ -20,11 +20,13 @@ struct OutlineEditorView: View {
     /// Whether this outline is a right-sidebar pane (SPEC §5.4): panes are for
     /// reference, so they never put the caret in a block on their own.
     var inPane = false
+    /// Feed outlines can coexist with an incoming day page during navigation.
+    var inJournalFeed = false
 
     var body: some View {
         OutlineEditorRepresentable(
             app: app, nav: nav, pageName: pageName, zoom: zoom,
-            inPane: inPane, dataVersion: app.dataVersion,
+            inPane: inPane, inJournalFeed: inJournalFeed, dataVersion: app.dataVersion,
             // Reading these here makes the view (and updateNSView) react to find.
             findActive: nav.findActive, findQuery: nav.findQuery,
             findStepToken: nav.findStepToken, findForward: nav.findStepForward,
@@ -42,6 +44,7 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
     let pageName: String
     let zoom: UUID?
     let inPane: Bool
+    let inJournalFeed: Bool
     /// @Published on AppState; bumps on external/index changes so
     /// `updateNSView` runs and the controller can diff and reload.
     let dataVersion: Int
@@ -60,6 +63,7 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> OutlineTableView {
         let controller = OutlineEditorController(app: app, nav: nav)
         controller.inPane = inPane
+        controller.inJournalFeed = inJournalFeed
         controller.applyPaneRole()
         context.coordinator.controller = controller
         context.coordinator.find = nav.find
@@ -335,6 +339,9 @@ final class OutlineEditorController: NSObject {
     /// never take focus on presentation, and a main outline may take focus from one
     /// (§5.4). Applied to the editor by `applyPaneRole`.
     var inPane = false
+    /// A result opens a standalone page. The feed's own outline for that day
+    /// must leave the highlight request alone.
+    var inJournalFeed = false
 
     /// Lets other outlines recognise this outline's editor as a pane's, when they
     /// decide whether taking focus is allowed.
@@ -594,8 +601,8 @@ final class OutlineEditorController: NSObject {
                 self.focusForWritingIfNeeded(explicit: true)
             }
         }
-        focusForWritingIfNeeded()
         applyPendingHighlightIfNeeded()
+        focusForWritingIfNeeded()
     }
 
     /// An outline whose only block is empty would otherwise render as nothing at
@@ -799,6 +806,7 @@ final class OutlineEditorController: NSObject {
     /// Scrolls to and flashes a block when a result click requested it — for the
     /// page this outline shows, on the surface the click asked for.
     private func applyPendingHighlightIfNeeded() {
+        guard !inJournalFeed, zoom == nil else { return }
         guard nav.highlightToken != lastHighlightToken else { return }
         guard let hl = nav.highlightTarget, hl.pageKey == PageName.key(pageName),
               hl.inSidebar == inPane else { return }
@@ -815,6 +823,10 @@ final class OutlineEditorController: NSObject {
             },
             pathAtPosition: { app.document(for: pageName).blocks.path(atPreorderPosition: $0) }
         ) else { return }
+        // There is something to reveal, so this is a reading visit. Today's
+        // journal must not replace it with its automatic writing focus, now or
+        // on a later pass.
+        autoFocusedPresentation = presentationKey
         requestReveal(of: rows[index].block.id)
     }
 

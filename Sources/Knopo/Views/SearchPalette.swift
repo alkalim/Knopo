@@ -122,6 +122,7 @@ struct SearchPalette: View {
 
     private func activate(_ results: [Result], sidebar: Bool) {
         guard results.indices.contains(selection) else { return }
+        dismiss()
         let target: NavTarget
         switch results[selection] {
         case .page(let name):
@@ -131,9 +132,10 @@ struct SearchPalette: View {
             nav.focusFirstBlock = name // focus the empty first block on load
             target = .page(name: name)
         case .block(let hit):
-            target = .page(name: hit.pageDisplayName, zoom: hit.blockID)
+            nav.navigateToBlock(pageName: hit.pageDisplayName, blockID: hit.blockID,
+                                content: hit.content, inSidebar: sidebar)
+            return
         }
-        dismiss()
         sidebar ? nav.openInRightSidebar(target) : nav.navigate(to: target)
     }
 

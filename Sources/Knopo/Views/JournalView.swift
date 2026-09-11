@@ -67,7 +67,7 @@ struct JournalDaySection: View {
                 }
                 Spacer()
             }
-            OutlineEditorView(pageName: day)
+            OutlineEditorView(pageName: day, inJournalFeed: true)
         }
     }
 }
