@@ -82,6 +82,12 @@ final class GraphManager: ObservableObject {
         return store
     }
 
+    /// The graph a new window or tab starts in: the one you are looking at.
+    /// At launch there is none, so the last graph opened wins.
+    static func rootForNewWindow(inheriting focused: URL?) -> URL {
+        focused ?? defaultRoot()
+    }
+
     /// KNOPO_GRAPH env var wins; then the last graph opened from the app;
     /// then ~/Documents/Knopo.
     static func defaultRoot() -> URL {
@@ -148,7 +154,10 @@ final class GraphHandle: ObservableObject {
 
     init(manager: GraphManager) {
         self.manager = manager
-        let root = GraphManager.defaultRoot()
+        // A tab is built before its own window takes key, so the active graph
+        // is still that of the window it was opened from.
+        let root = GraphManager.rootForNewWindow(
+            inheriting: ActiveGraph.shared.actions?.app.store.root)
         self.root = root
         self.app = manager.acquireOrFatal(root)
     }
