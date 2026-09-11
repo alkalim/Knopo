@@ -208,6 +208,7 @@ struct KnopoApp: App {
         _manager = StateObject(wrappedValue: GraphManager(preferences: preferences))
         // KNOPO_BENCH=1: run the headless perf harness and exit (see Bench.swift).
         MainActor.assumeIsolated { Bench.runIfRequested() }
+        MainActor.assumeIsolated { TabShortcuts.install() }
         // SPM executables aren't app bundles; make us a regular GUI app.
         // The app icon comes from the bundle (see scripts/build-app.sh) so the
         // OS can theme it ("Icon & widget style" on macOS 26); we deliberately
@@ -375,6 +376,46 @@ private struct GraphView: View {
 /// SwiftUI's automatic autosave: that key is derived from the (private, nested)
 /// `RootView`'s mangled type name, which embeds a per-launch pointer — so it
 /// changes every launch and never restores.
+/// `⌘1`-`⌘8` select that tab of the focused window's tab group. `⌘9` selects
+/// the last one, as in Safari. Key equivalents, not menu items: nine more rows
+/// in the Window menu would be clutter.
+enum TabShortcuts {
+    /// The tab a digit selects, or nil if there is none. Nil lets the key
+    /// through to whatever else is bound to it.
+    static func tabIndex(forDigit digit: Int, tabCount: Int) -> Int? {
+        guard (1...9).contains(digit), tabCount > 1 else { return nil }
+        let index = digit == 9 ? tabCount - 1 : digit - 1
+        return index < tabCount ? index : nil
+    }
+
+    static func install() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // The handled flag, not the event, crosses back out: `NSEvent` is
+            // not `Sendable`.
+            let handled = MainActor.assumeIsolated { select(for: event) }
+            return handled ? nil : event
+        }
+    }
+
+    /// The digit of a plain `⌘`-digit event, else nil. `⌃⌘0` is line spacing
+    /// and `⇧⌘1` is something else; both must reach their own commands.
+    static func digit(for event: NSEvent) -> Int? {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+        else { return nil }
+        return event.charactersIgnoringModifiers.flatMap { Int($0) }
+    }
+
+    /// Selects the tab the event asks for. Returns true if it used the event.
+    private static func select(for event: NSEvent) -> Bool {
+        guard let digit = digit(for: event),
+              let group = NSApp.keyWindow?.tabGroup,
+              let index = tabIndex(forDigit: digit, tabCount: group.windows.count)
+        else { return false }
+        group.selectedWindow = group.windows[index]
+        return true
+    }
+}
+
 /// An `NSView` that reports when it's added to a window — the earliest hook to
 /// position the window before its first display (avoiding a reposition flash).
 private final class WindowHookView: NSView {
