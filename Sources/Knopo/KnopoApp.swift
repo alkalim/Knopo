@@ -341,6 +341,9 @@ private struct GraphView: View {
         MainWindow(
             graphName: app.store.root.lastPathComponent,
             openGraphSettings: { graphSettingsPresented = true })
+            // Name the scene after the graph: otherwise SwiftUI writes the app's
+            // name, which `refreshTabTitle` reads back as this window's graph.
+            .navigationTitle(app.store.root.lastPathComponent)
             .environmentObject(app)
             .environmentObject(nav)
             .focusedSceneValue(\.navigator, nav)
@@ -382,7 +385,7 @@ private final class WindowHookView: NSView {
     }
 }
 
-private struct WindowConfigurator: NSViewRepresentable {
+struct WindowConfigurator: NSViewRepresentable {
     /// Called when this window becomes key (and once when it is first set up), so
     /// menu commands can target the graph you're actually working in.
     let onActivate: () -> Void
@@ -410,6 +413,8 @@ private struct WindowConfigurator: NSViewRepresentable {
     final class Coordinator {
         var configured = false
         var observers: [NSObjectProtocol] = []
+        /// Re-hides the titlebar. Released with this coordinator.
+        var titleVisible: NSKeyValueObservation?
         weak var window: NSWindow?
         var graphName = ""
         var pageTitle = ""
@@ -469,6 +474,13 @@ private struct WindowConfigurator: NSViewRepresentable {
         coordinator.window = window
         window.title = graphName
         window.titleVisibility = .hidden
+        // SwiftUI unhides it whenever it re-applies the scene's name. Fixing
+        // that in `updateNSView` is a runloop turn late, and needs an update.
+        coordinator.titleVisible = window.observe(\.titleVisibility) { window, _ in
+            MainActor.assumeIsolated {
+                if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
+            }
+        }
         window.minSize = NSSize(width: 900, height: 560)
         // Native tabs: new scenes merge into one tab group, so `Cmd+T` ("New
         // Tab") works and tabs are available regardless of the system "prefer
