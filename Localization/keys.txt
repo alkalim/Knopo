@@ -141,6 +141,7 @@ Theme
 This date format produces no text.	Custom journal date pattern: valid syntax, but renders nothing
 Today
 Today's Journal
+Toggle Sidebar
 Type to search
 URL (https://…)	Link panel: the link's destination
 Unavailable

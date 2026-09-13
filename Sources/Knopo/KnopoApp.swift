@@ -582,6 +582,14 @@ private struct NavigationCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
+            // Sent up the responder chain, so it still works while the outline
+            // editor is first responder. SwiftUI has no focused value then.
+            Button("Toggle Sidebar") {
+                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)),
+                                 to: nil, from: nil)
+            }
+            .keyboardShortcut("s", modifiers: [.control, .command])
+            Divider()
             Button("Back") { nav?.goBack() }
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(nav == nil)
