@@ -2145,6 +2145,9 @@ final class OutlineEditorController: NSObject {
             pagePreview: { [weak self] name in
                 self?.previewAttributedString(forPage: name)
             },
+            tagPreview: { [weak self] tag in
+                self?.previewAttributedString(forTag: tag)
+            },
             beginDrag: { [weak self] event, view in
                 self?.beginDragSession(for: id, event: event, from: view)
             },
@@ -2223,25 +2226,73 @@ final class OutlineEditorController: NSObject {
     }
 
     /// First ~10 blocks of a page for the hover preview popover (SPEC §6.1).
-    private func previewAttributedString(forPage name: String) -> NSAttributedString? {
+    /// No page title: the pointer is on the link that names it. A page with
+    /// nothing to show gets the chip its title carries, so the popover is never
+    /// blank.
+    func previewAttributedString(forPage name: String) -> NSAttributedString? {
         let doc = app.document(for: name)
         let out = NSMutableAttributedString()
-        out.append(NSAttributedString(string: app.displayTitle(for: doc), attributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .bold),
-            .foregroundColor: NSColor.labelColor,
-        ]))
-        for row in OutlineOps.visibleRows(in: doc.blocks).prefix(10) {
+        for row in OutlineOps.visibleRows(in: doc.blocks).prefix(10)
+        where !row.block.content.isEmpty {
+            if out.length > 0 { out.append(NSAttributedString(string: "\n")) }
             let indent = String(repeating: "    ", count: row.depth)
-            out.append(NSAttributedString(string: "\n\(indent)\u{2022} ", attributes: [
+            out.append(NSAttributedString(string: "\(indent)\u{2022} ", attributes: [
                 .font: BlockRenderer.baseFont(),
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ]))
             out.append(renderForPreview(row.block.content))
         }
+        if out.length == 0 {
+            out.append(Self.pill(doc.fileExists
+                ? String(localized: "empty", comment: "Hover preview of a page with no content")
+                : L("stub")))
+        }
         // A preview is a non-interactive glance — drop link styling so refs/embeds
         // don't show as blue underlined links (and no `knopo://` tooltips).
         out.removeAttribute(.link, range: NSRange(location: 0, length: out.length))
         return out
+    }
+
+    /// A tag's blocks come from any page, so each line names its own.
+    func previewAttributedString(forTag tag: String) -> NSAttributedString? {
+        let hits = (try? app.store.cache.blocks(taggedWith: tag))?.prefix(10) ?? []
+        let out = NSMutableAttributedString()
+        for hit in hits where !hit.content.isEmpty {
+            if out.length > 0 { out.append(NSAttributedString(string: "\n")) }
+            out.append(NSAttributedString(string: "\(app.displayTitle(for: hit.pageDisplayName))  ",
+                                          attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]))
+            out.append(renderForPreview(hit.content))
+        }
+        if out.length == 0 { out.append(Self.pill(L("empty"))) }
+        out.removeAttribute(.link, range: NSRange(location: 0, length: out.length))
+        return out
+    }
+
+    /// The chip `PageScreen` puts beside a page with no file. Drawn as an image
+    /// so it can sit in a text view.
+    private static func pill(_ text: String) -> NSAttributedString {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let text = text as NSString
+        let pad = NSSize(width: 9, height: 4)
+        let size = text.size(withAttributes: attrs)
+        let box = NSSize(width: ceil(size.width) + pad.width * 2,
+                         height: ceil(size.height) + pad.height * 2)
+        let image = NSImage(size: box, flipped: false) { rect in
+            NSColor.secondaryLabelColor.withAlphaComponent(0.15).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: rect.height / 2,
+                         yRadius: rect.height / 2).fill()
+            text.draw(at: NSPoint(x: pad.width, y: pad.height), withAttributes: attrs)
+            return true
+        }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        return NSAttributedString(attachment: attachment)
     }
 
     /// Like `render(_:)` but for a hover preview: embeds and queries are *not*

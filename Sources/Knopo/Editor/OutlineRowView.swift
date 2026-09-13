@@ -15,6 +15,8 @@ struct OutlineRowCallbacks {
     var selectBlock: (_ extend: Bool, _ toggle: Bool) -> Void = { _, _ in }
     /// Renders a page's first ~10 blocks for the hover preview (SPEC §6.1).
     var pagePreview: (String) -> NSAttributedString? = { _ in nil }
+    /// The same for a `#tag`: its first ~10 blocks (SPEC §8.2).
+    var tagPreview: (String) -> NSAttributedString? = { _ in nil }
     /// Bullet drag: starts a block-move drag session (event, source view).
     var beginDrag: (NSEvent, NSView) -> Void = { _, _ in }
     /// Resizes the n-th image token in this block to the given display width.
@@ -105,8 +107,8 @@ final class OutlineRowCell: NSTableCellView {
         renderedView.onFocusRequest = { [weak self] index in
             self?.callbacks.focusContent(index)
         }
-        renderedView.onHoverPageLink = { [weak self] name, rect in
-            self?.showPreview(forPage: name, near: rect)
+        renderedView.onHoverRef = { [weak self] ref, rect in
+            self?.showPreview(of: ref, near: rect)
         }
         renderedView.onHoverEnded = { [weak self] in self?.closePreview() }
         renderedView.onImageResize = { [weak self] index, width in
@@ -464,9 +466,22 @@ final class OutlineRowCell: NSTableCellView {
 
     // MARK: - Hover preview (SPEC §6.1)
 
-    private func showPreview(forPage name: String, near rect: NSRect) {
+    private func showPreview(of ref: RenderedTextView.HoverRef, near rect: NSRect) {
         closePreview()
-        guard let content = callbacks.pagePreview(name) else { return }
+        let content: NSAttributedString?
+        switch ref {
+        case .page(let name): content = callbacks.pagePreview(name)
+        case .tag(let tag): content = callbacks.tagPreview(tag)
+        }
+        guard let content else { return }
+        // A page with nothing in it previews as one chip. Give that a small
+        // popover with the chip centred.
+        if content.length == 1,
+           let chip = (content.attribute(.attachment, at: 0, effectiveRange: nil)
+               as? NSTextAttachment)?.image {
+            showChipPreview(chip, near: rect)
+            return
+        }
         let width: CGFloat = 360
         let measured = content.boundingRect(
             with: NSSize(width: width - 24, height: .greatestFiniteMagnitude),
@@ -489,9 +504,35 @@ final class OutlineRowCell: NSTableCellView {
         let controller = NSViewController()
         controller.view = scroll
         let popover = NSPopover()
-        popover.behavior = .transient
+        // Not `.transient`: that closes on the next click and swallows it, so
+        // the link you are hovering never gets clicked. This one is closed by
+        // the hover ending, or by the click, which then lands.
+        popover.behavior = .applicationDefined
         popover.contentViewController = controller
         popover.contentSize = NSSize(width: width, height: height)
+        let anchor = rect.isEmpty
+            ? NSRect(x: 0, y: 0, width: max(renderedView.bounds.width, 1), height: 4)
+            : rect
+        popover.show(relativeTo: anchor, of: renderedView, preferredEdge: .maxY)
+        previewPopover = popover
+    }
+
+    private func showChipPreview(_ chip: NSImage, near rect: NSRect) {
+        let margin = NSSize(width: 20, height: 12)
+        let box = NSSize(width: chip.size.width + margin.width * 2,
+                         height: chip.size.height + margin.height * 2)
+        let view = NSView(frame: NSRect(origin: .zero, size: box))
+        let imageView = NSImageView(image: chip)
+        imageView.frame = NSRect(x: margin.width, y: margin.height,
+                                 width: chip.size.width, height: chip.size.height)
+        imageView.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        view.addSubview(imageView)
+        let controller = NSViewController()
+        controller.view = view
+        let popover = NSPopover()
+        popover.behavior = .applicationDefined
+        popover.contentViewController = controller
+        popover.contentSize = box
         let anchor = rect.isEmpty
             ? NSRect(x: 0, y: 0, width: max(renderedView.bounds.width, 1), height: 4)
             : rect
@@ -523,8 +564,16 @@ final class RenderedTextView: NSTextView {
     var onFocusRequest: (Int) -> Void = { _ in }
     /// Shift/Cmd+click → node selection (extend / toggle), not editing.
     var onSelectRequest: (_ extend: Bool, _ toggle: Bool) -> Void = { _, _ in }
-    var onHoverPageLink: (String, NSRect) -> Void = { _, _ in }
+    var onHoverRef: (HoverRef, NSRect) -> Void = { _, _ in }
     var onHoverEnded: () -> Void = {}
+    /// What the pointer is resting on: both get a preview.
+    enum HoverRef: Equatable {
+        case page(String)
+        case tag(String)
+    }
+    /// How long a link is hovered before its preview opens. Long enough that a
+    /// pause on the way to clicking it opens nothing.
+    static let hoverPreviewDelay: TimeInterval = 0.7
     var onImageResize: (_ imageIndex: Int, _ width: CGFloat) -> Void = { _, _ in }
     /// Right-click shows the block context menu (Copy as Markdown, etc.), not the
     /// stock text-view menu — whose Copy would serialize the *rendered* attributed
@@ -743,6 +792,9 @@ final class RenderedTextView: NSTextView {
     // MARK: Clicks
 
     override func mouseDown(with event: NSEvent) {
+        // Take the preview down first. The click then does its own job.
+        cancelHover()
+        onHoverEnded()
         let point = convert(event.locationInWindow, from: nil)
         let imageHit = imageHandle(at: point)
         if let image = imageHit {
@@ -1051,7 +1103,7 @@ final class RenderedTextView: NSTextView {
         }
         if linkValue(at: point) != nil { NSCursor.pointingHand.set() }
         else { NSCursor.arrow.set() }
-        guard let (name, range) = pageLink(at: point) else {
+        guard let (ref, range) = hoverRef(at: point) else {
             cancelHover()
             onHoverEnded()
             return
@@ -1063,10 +1115,10 @@ final class RenderedTextView: NSTextView {
             guard let self, let window = self.window else { return }
             let screenRect = self.firstRect(forCharacterRange: range, actualRange: nil)
             let local = self.convert(window.convertFromScreen(screenRect), from: nil)
-            self.onHoverPageLink(name, local)
+            self.onHoverRef(ref, local)
         }
         hoverWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.hoverPreviewDelay, execute: work)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -1084,7 +1136,7 @@ final class RenderedTextView: NSTextView {
         hoverRange = nil
     }
 
-    private func pageLink(at point: NSPoint) -> (name: String, range: NSRange)? {
+    private func hoverRef(at point: NSPoint) -> (ref: HoverRef, range: NSRange)? {
         guard let storage = textStorage, storage.length > 0 else { return nil }
         let index = characterIndexForInsertion(at: point)
         guard index >= 0, index < storage.length else { return nil }
@@ -1094,9 +1146,14 @@ final class RenderedTextView: NSTextView {
         if storage.attribute(.embedRegion, at: index, effectiveRange: nil) != nil { return nil }
         var range = NSRange(location: 0, length: 0)
         guard let url = storage.attribute(.link, at: index, effectiveRange: &range) as? URL,
-              url.scheme == "knopo", url.host == "page",
-              let name = KnopoURL.pageName(from: url) else { return nil }
-        return (name, range)
+              url.scheme == "knopo" else { return nil }
+        if url.host == "page", let name = KnopoURL.pageName(from: url) {
+            return (.page(name), range)
+        }
+        if case .tag(let tag) = KnopoURL.decode(url), !tag.isEmpty {
+            return (.tag(tag), range)
+        }
+        return nil
     }
 }
 

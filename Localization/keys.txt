@@ -159,6 +159,7 @@ Zoom Out
 block quote
 embed a block
 embed a page
+empty	Hover preview of a page with no content
 fenced code
 insert image
 insert link

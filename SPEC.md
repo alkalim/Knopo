@@ -303,7 +303,7 @@ A block can carry a background color, rendered as a soft rounded box behind its 
 - A committed reference is stored literally as `[[Page Name]]` in the block's Markdown.
 - Rendered as a link; click navigates to the page. `Cmd+Click` opens it in the right sidebar.
 - Referencing a non-existent page creates a **stub** (see §3.2) — navigable, shows linked references, gets a file only once content is added.
-- Hovering a reference shows a preview popover of the page's first ~10 blocks.
+- Hovering a reference for a second shows a preview popover of the page's first ~10 blocks. It has no title (the link under the pointer is the name) and a page with nothing in it shows the `stub` / `empty` chip instead. Clicking the link while the preview is open closes it and navigates.
 
 ### 6.2 Renaming pages
 
@@ -370,7 +370,7 @@ A block whose content contains `{{embed ((uuid))}}` or `{{embed [[Page Name]]}}`
 
 ### 8.2 Behavior
 
-- Rendered as a chip. Clicking a tag opens a **tag view**: a generated, read-only result list of all blocks carrying that tag, grouped by page, each block rendered with breadcrumb and click-to-navigate. The tag view is not a page — it can't be edited, referenced, or linked to. A tag *can* be favourited, however (§11.1).
+- Rendered as a chip. Clicking a tag opens a **tag view**: a generated, read-only result list of all blocks carrying that tag, grouped by page, each block rendered with breadcrumb and click-to-navigate. The tag view is not a page — it can't be edited, referenced, or linked to. A tag *can* be favourited, however (§11.1). Hovering one previews its first ~10 blocks, each line naming the page it is on.
 - Typing `#` opens autocomplete over existing tags.
 - A **Tags** entry in the left sidebar lists tags with usage counts, ordered most-used first; the displayed list is capped (15 in v1, later a setting). Clicking opens the tag view. The usage count is the number of occurrences (a tag appearing twice in one block counts twice).
 - Tag occurrences do **not** appear in any page's Linked References (there is no page to link to).
