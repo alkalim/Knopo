@@ -146,6 +146,11 @@ struct Sidebar: View {
 
     // MARK: - Rows and selection
 
+    /// How far AppKit insets a source-list row's selection from the row width.
+    /// It draws the right-click outline there too. `SidebarSelectionInsetTests`
+    /// measures it, so a system that changes it fails that test.
+    static let selectionInset: CGFloat = 10
+
     @ViewBuilder
     private func sidebarRow<Content: View>(
         _ rowID: RowID, target: NavTarget, @ViewBuilder content: () -> Content
@@ -169,15 +174,18 @@ struct Sidebar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // Pill hugs the row content (inset from the sidebar edges), like
-        // first-party sidebars — not the full row width.
-        .background(
+        // The pill is the row's background, not the content's. AppKit outlines
+        // that rect on right-click. Content sits in a further inset that
+        // `listRowInsets` cannot reach.
+        .listRowBackground(
             RoundedRectangle(cornerRadius: 6)
                 .fill(selected
                     ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
                     : Color.clear)
+                // The row background spans the sidebar. The highlight is
+                // inset from it.
+                .padding(.horizontal, Self.selectionInset)
         )
-        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
     }
 
     /// A row highlights when it points at the current location — but if the
