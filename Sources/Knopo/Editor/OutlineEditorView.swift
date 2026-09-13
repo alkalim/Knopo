@@ -1218,9 +1218,22 @@ final class OutlineEditorController: NSObject {
     /// Paints `url` as the click target across `range`, but leaves any TODO
     /// checkbox's `knopo://toggle-todo` link intact — so a checkbox inside a
     /// query result or embed still toggles instead of navigating to the source.
+    /// Renders one generated row the way a query result does, for tests.
+    func renderGeneratedRow(content: String, navigatingTo url: URL) -> NSAttributedString {
+        let row = NSMutableAttributedString(attributedString: BlockRenderer.render(
+            content: content,
+            context: BlockRenderer.Context(
+                resolveBlockRef: { [weak app] id in app?.store.resolveBlock(id)?.block.content },
+                assetsDir: app.store.assetsDir, inlineQuoteBar: true, tables: false)))
+        addNavigationLink(row, url, over: NSRange(location: 0, length: row.length))
+        return row
+    }
+
+    /// Makes a generated row navigate somewhere. Anything inside it that
+    /// already links - a ref, a block ref, a TODO checkbox - keeps its target.
     private func addNavigationLink(_ body: NSMutableAttributedString, _ url: URL, over range: NSRange) {
         body.enumerateAttribute(.link, in: range) { value, sub, _ in
-            if let existing = value as? URL, existing.host == "toggle-todo" { return }
+            guard value == nil else { return }
             body.addAttribute(.link, value: url, range: sub)
         }
     }
@@ -1297,10 +1310,9 @@ final class OutlineEditorController: NSObject {
             var hitContext = inner
             hitContext.todoBlockID = hit.blockID  // toggle this hit's block, not the host
             row.append(BlockRenderer.render(content: hit.content, context: hitContext))
-            // The whole result row navigates to that block — except its TODO
-            // checkbox, which keeps its toggle link. Carry the page name (not a
-            // bare block id) — the index id may not survive a re-parse, so a
-            // name-less block link can fail to resolve its page.
+            // The row navigates to that block where nothing else links. Carry
+            // the page name, not a bare block id: the index id may not survive
+            // a re-parse, and then the page cannot be resolved.
             addNavigationLink(row, KnopoURL.block(hit.blockID, onPage: hit.pageDisplayName),
                               over: NSRange(location: 0, length: row.length))
             applyHangingIndent(row, range: NSRange(location: 0, length: row.length),

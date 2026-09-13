@@ -608,6 +608,9 @@ final class RenderedTextView: NSTextView {
         view.isVerticallyResizable = false
         view.autoresizingMask = [.width, .height]
         view.linkTextAttributes = [.cursor: NSCursor.pointingHand]
+        // `knopo://page/…` as a tooltip helps nobody. `mouseMoved` supplies
+        // one for external links instead.
+        view.displaysLinkToolTips = false
         view.delegate = view
         view.resizeOverlay.frame = view.bounds
         view.resizeOverlay.autoresizingMask = [.width, .height]
@@ -1004,30 +1007,38 @@ final class RenderedTextView: NSTextView {
         }
     }
 
-    private func linkValue(at point: NSPoint) -> URL? {
+    /// The character the point lands on, or nil for empty space.
+    /// `characterIndexForInsertion` snaps to the nearest position instead, which
+    /// past the end of a line is a neighbouring row's link.
+    ///
+    /// Check the *line* fragment, not the layout fragment. A wrapped link is one
+    /// fragment as wide as its longest line, so the short last line's empty gap
+    /// would map to the link.
+    func characterIndex(hitting point: NSPoint) -> Int? {
         guard let storage = textStorage, storage.length > 0 else { return nil }
-        // A click in the empty space past a line's text isn't a link (it falls
-        // through to focusing the block); only a hit on actual glyphs counts.
-        // Check the specific *line* fragment, not the whole layout fragment: a
-        // wrapped link is one multi-line fragment whose width is the long first
-        // line's, so the short trailing line's empty gap would otherwise map to
-        // the link.
         let container = NSPoint(x: point.x - textContainerInset.width,
                                 y: point.y - textContainerInset.height)
         if let lm = textLayoutManager, let frag = lm.textLayoutFragment(for: container) {
             let origin = frag.layoutFragmentFrame.origin
+            var onALine = false
             var pastLineText = container.x > frag.layoutFragmentFrame.maxX
             for line in frag.textLineFragments {
                 let bounds = line.typographicBounds.offsetBy(dx: origin.x, dy: origin.y)
                 if container.y >= bounds.minY, container.y < bounds.maxY {
+                    onALine = true
                     pastLineText = container.x > bounds.maxX
                     break
                 }
             }
-            if pastLineText { return nil }
+            if !onALine || pastLineText { return nil }
         }
         let index = min(characterIndexForInsertion(at: point), storage.length - 1)
-        guard index >= 0 else { return nil }
+        return index >= 0 ? index : nil
+    }
+
+    private func linkValue(at point: NSPoint) -> URL? {
+        guard let storage = textStorage, let index = characterIndex(hitting: point)
+        else { return nil }
         let value = storage.attribute(.link, at: index, effectiveRange: nil)
         if let url = value as? URL { return url }
         if let string = value as? String { return URL(string: string) }
@@ -1101,8 +1112,11 @@ final class RenderedTextView: NSTextView {
             onHoverEnded()
             return
         }
-        if linkValue(at: point) != nil { NSCursor.pointingHand.set() }
-        else { NSCursor.arrow.set() }
+        let link = linkValue(at: point)
+        if link != nil { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+        // External links keep the URL tooltip AppKit would have shown.
+        // `knopo://` ones get none.
+        toolTip = link.flatMap { $0.scheme == "knopo" ? nil : $0.absoluteString }
         guard let (ref, range) = hoverRef(at: point) else {
             cancelHover()
             onHoverEnded()
@@ -1123,6 +1137,7 @@ final class RenderedTextView: NSTextView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        toolTip = nil
         hoverImageIndex = nil
         updateResizeOverlay(hoverFrame: nil, preview: nil)
         NSCursor.arrow.set()
@@ -1136,24 +1151,20 @@ final class RenderedTextView: NSTextView {
         hoverRange = nil
     }
 
-    private func hoverRef(at point: NSPoint) -> (ref: HoverRef, range: NSRange)? {
-        guard let storage = textStorage, storage.length > 0 else { return nil }
-        let index = characterIndexForInsertion(at: point)
-        guard index >= 0, index < storage.length else { return nil }
-        // No hover preview inside a generated region (query results / embeds):
-        // those rows are themselves page links, and a transient popover over
-        // them swallows the next click, making result rows feel unclickable.
-        if storage.attribute(.embedRegion, at: index, effectiveRange: nil) != nil { return nil }
+    func hoverRef(at point: NSPoint) -> (ref: HoverRef, range: NSRange)? {
+        guard let storage = textStorage, let index = characterIndex(hitting: point),
+              index < storage.length else { return nil }
         var range = NSRange(location: 0, length: 0)
         guard let url = storage.attribute(.link, at: index, effectiveRange: &range) as? URL,
               url.scheme == "knopo" else { return nil }
-        if url.host == "page", let name = KnopoURL.pageName(from: url) {
-            return (.page(name), range)
+        // A result row is one link to its source block, laid over the row's
+        // content. A block link is not a page reference, so it previews
+        // nothing: the page it lives on is not what the pointer is on.
+        switch KnopoURL.decode(url) {
+        case .page(let name, nil) where !name.isEmpty: return (.page(name), range)
+        case .tag(let tag) where !tag.isEmpty: return (.tag(tag), range)
+        default: return nil
         }
-        if case .tag(let tag) = KnopoURL.decode(url), !tag.isEmpty {
-            return (.tag(tag), range)
-        }
-        return nil
     }
 }
 
