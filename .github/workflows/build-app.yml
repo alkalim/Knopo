@@ -45,19 +45,18 @@ jobs:
             flag && /^## / { exit }
             flag { print }
           ' CHANGELOG.md > release-notes.md
-          # Append the same Gatekeeper note to every release: the build is
-          # unsigned/un-notarized, so macOS quarantines it and users must clear
-          # the flag before it will open.
+          # Append the same Gatekeeper note to every release. The build has an
+          # ad-hoc signature but no Developer ID signature or notarization.
           cat >> release-notes.md <<'EOF'
 
           ---
 
           ### Opening Knopo the first time
 
-          Knopo isn't code-signed or notarized yet, so macOS quarantines the download and refuses to open it. After unzipping and moving `Knopo.app` into Applications, open the Terminal (Applications ▸ Utilities ▸ Terminal) and run this command to clear the quarantine flag:
+          Knopo has an ad-hoc code signature, but it isn't signed with a Developer ID certificate or notarized. Gatekeeper may block a downloaded copy. After unzipping and moving `Knopo.app` into Applications, open the Terminal (Applications ▸ Utilities ▸ Terminal) and run this command to clear the quarantine flag:
 
           ```sh
-          xattr -dr com.apple.quarantine /Applications/Knopo.app
+          sudo xattr -dr com.apple.quarantine /Applications/Knopo.app
           ```
 
           Then open the app normally. (Adjust the path if you keep the app elsewhere.)

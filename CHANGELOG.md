@@ -2,6 +2,30 @@
 
 Notable changes per release, newest first. Dates are release dates.
 
+## v0.7.0 (2026-09-14)
+
+Settings and journal dates, with smoother search, tabs and link previews.
+
+**New**
+- Settings (`⌘,`) brings together the app's theme, body font weight and page-link bracket controls.
+- Journal titles can use abbreviated, long, numeric or ISO dates, or a custom pattern.
+- Graph Settings (`⌥⌘,`) shows the search index's size and can rebuild it from Markdown without clearing recent pages.
+- `⌘1`–`⌘8` switch to a numbered tab, `⌘9` selects the last tab, and `⌃⌘S` toggles the left sidebar.
+- `⌘X` cuts selected blocks. The Edit menu's Cut, Copy, Paste and Select All commands now work on block selections too.
+
+**Improved**
+- New windows and tabs open in the focused window's graph.
+- Page-name search ignores accents, so `cafe` finds Café. Block search results open the full page with the matching block in view, rather than zooming into it.
+- Hovering a tag previews matching blocks. Page previews wait until you pause over a link, and clicking while a preview is open still follows the link.
+
+**Fixes**
+- `⌘J` reaches today's writing block even when you are far back in the journal feed.
+- Links inside query results and embeds follow their own targets instead of opening the surrounding result's source.
+
+**For contributors**
+- The interface can now use added translations; the release remains in English, and a translation guide is included.
+- Building `Knopo.app` from source now needs Xcode for the icon. `swift build` and the test suite still work with the Command Line Tools.
+
 ## v0.6.2 (2026-08-14)
 
 A maintenance release: navigation fixes around results, `⌘J`, and page links.
