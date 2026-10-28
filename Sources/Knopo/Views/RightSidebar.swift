@@ -25,8 +25,11 @@ struct RightSidebar: View {
     private var columnSurface: some View {
         if Self.isMacOS26OrLater {
             // Cards scroll under the toolbar, as in the main view.
+            // A Divider marks the toolbar edge. The VStack keeps it horizontal
+            // inside the parent HStack.
             paneList
                 .background(Self.columnColor, ignoresSafeAreaEdges: .all)
+                .overlay(alignment: .top) { VStack(spacing: 0) { Divider() } }
         } else {
             // On 15, grey under the toolbar merges with it.
             // Stop at its bottom edge and add a separator.

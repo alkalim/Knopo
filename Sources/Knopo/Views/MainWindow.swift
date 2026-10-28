@@ -13,6 +13,8 @@ struct MainWindow: View {
     /// makes it scale with the window and restore correctly at any window size.
     @State private var rightFraction: CGFloat?
     @State private var dragStartWidth: CGFloat?
+    /// Whether the main view's content has scrolled under the toolbar.
+    @State private var mainScrolled = false
     @StateObject private var sidebarTransition = SidebarTransition.State()
 
     private let mainMinWidth: CGFloat = 320
@@ -45,6 +47,11 @@ struct MainWindow: View {
                             // mode keeps the existing dark look.
                             .background(Color(nsColor: .dynamic(
                                 light: .textBackgroundColor, dark: .windowBackgroundColor)))
+                            .onScrollUnderToolbar { mainScrolled = $0 }
+                            // The find bar draws its own line.
+                            .overlay(alignment: .top) {
+                                if mainScrolled && !nav.findActive { Divider() }
+                            }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .animation(app.preferences.animationsEnabled ? .easeOut(duration: 0.18) : nil,
@@ -170,6 +177,23 @@ private extension View {
         } else {
             // Keep the native tab strip and its "+" button on older systems.
             toolbarBackground(.visible, for: .windowToolbar)
+        }
+    }
+
+    /// Reports whether content has scrolled under the toolbar.
+    /// macOS 26 and later. Their hidden toolbar background draws no line.
+    /// Content below fixed views, like the All Pages list, has no top inset.
+    @ViewBuilder
+    func onScrollUnderToolbar(_ action: @escaping (Bool) -> Void) -> some View {
+        if #available(macOS 26.0, *) {
+            onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentInsets.top > 0
+                    && geometry.contentOffset.y + geometry.contentInsets.top > 0
+            } action: { _, scrolled in
+                action(scrolled)
+            }
+        } else {
+            self
         }
     }
 }
