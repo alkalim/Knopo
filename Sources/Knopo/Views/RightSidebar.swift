@@ -21,20 +21,17 @@ struct RightSidebar: View {
     }
 
     /// Recessed column so the lighter cards read as elevated documents.
+    /// The grey stops at the toolbar's bottom edge. Under the toolbar it would
+    /// show through the tab bar on 26 and merge with the toolbar on 15.
     @ViewBuilder
     private var columnSurface: some View {
+        let column = paneList
+            .background(Self.columnColor, ignoresSafeAreaEdges: [.horizontal, .bottom])
         if Self.isMacOS26OrLater {
-            // Cards scroll under the toolbar, as in the main view.
-            // A Divider marks the toolbar edge. The VStack keeps it horizontal
-            // inside the parent HStack.
-            paneList
-                .background(Self.columnColor, ignoresSafeAreaEdges: .all)
-                .overlay(alignment: .top) { VStack(spacing: 0) { Divider() } }
+            // The system toolbar background draws the line.
+            column
         } else {
-            // On 15, grey under the toolbar merges with it.
-            // Stop at its bottom edge and add a separator.
-            paneList
-                .background(Self.columnColor, ignoresSafeAreaEdges: [.horizontal, .bottom])
+            column
                 .safeAreaInset(edge: .top, spacing: 0) {
                     Color(nsColor: .separatorColor)
                         .frame(height: 1)

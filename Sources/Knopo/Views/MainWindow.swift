@@ -13,8 +13,6 @@ struct MainWindow: View {
     /// makes it scale with the window and restore correctly at any window size.
     @State private var rightFraction: CGFloat?
     @State private var dragStartWidth: CGFloat?
-    /// Whether the main view's content has scrolled under the toolbar.
-    @State private var mainScrolled = false
     @StateObject private var sidebarTransition = SidebarTransition.State()
 
     private let mainMinWidth: CGFloat = 320
@@ -44,14 +42,12 @@ struct MainWindow: View {
                             // editor's table/scroll views are clear, so otherwise
                             // it shows the window's grey (notably heavier on macOS
                             // 15 than 26). White in light mode; window grey in dark
-                            // mode keeps the existing dark look.
-                            .background(Color(nsColor: .dynamic(
-                                light: .textBackgroundColor, dark: .windowBackgroundColor)))
-                            .onScrollUnderToolbar { mainScrolled = $0 }
-                            // The find bar draws its own line.
-                            .overlay(alignment: .top) {
-                                if mainScrolled && !nav.findActive { Divider() }
-                            }
+                            // mode keeps the existing dark look. It stops at the
+                            // toolbar, so the toolbar and tab bar keep one color.
+                            .background(
+                                Color(nsColor: .dynamic(
+                                    light: .textBackgroundColor, dark: .windowBackgroundColor)),
+                                ignoresSafeAreaEdges: [.horizontal, .bottom])
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .animation(app.preferences.animationsEnabled ? .easeOut(duration: 0.18) : nil,
@@ -63,11 +59,13 @@ struct MainWindow: View {
                             .frame(maxHeight: .infinity)
                     }
                 }
-                .documentToolbarBackground(topInset: geo.safeAreaInsets.top)
             }
         }
         .background(SidebarTransition.WindowAttachment(state: sidebarTransition,
                                                        preferences: app.preferences))
+        // The system background frosts the toolbar and draws its bottom line.
+        // It also gives the tab bar a strip with a centered "+" button.
+        .toolbarBackground(.visible, for: .windowToolbar)
         // Native-style Back/Forward in the toolbar's leading navigation area
         // (like Finder/Safari), mirroring the ⌘[ / ⌘] commands.
         .toolbar {
@@ -159,80 +157,6 @@ struct MainWindow: View {
         case .allPages:
             AllPagesView()
         }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func documentToolbarBackground(topInset: CGFloat) -> some View {
-        if #available(macOS 26.0, *) {
-            // Frost the document columns without covering the navigation sidebar.
-            overlay(alignment: .top) {
-                ToolbarFrost()
-                    .frame(height: topInset)
-                    .offset(y: -topInset)
-                    .allowsHitTesting(false)
-            }
-            .toolbarBackground(.hidden, for: .windowToolbar)
-        } else {
-            // Keep the native tab strip and its "+" button on older systems.
-            toolbarBackground(.visible, for: .windowToolbar)
-        }
-    }
-
-    /// Reports whether content has scrolled under the toolbar.
-    /// macOS 26 and later. Their hidden toolbar background draws no line.
-    /// Content below fixed views, like the All Pages list, has no top inset.
-    @ViewBuilder
-    func onScrollUnderToolbar(_ action: @escaping (Bool) -> Void) -> some View {
-        if #available(macOS 26.0, *) {
-            onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentInsets.top > 0
-                    && geometry.contentOffset.y + geometry.contentInsets.top > 0
-            } action: { _, scrolled in
-                action(scrolled)
-            }
-        } else {
-            self
-        }
-    }
-}
-
-/// Native tabs provide their own material. Keep the toolbar frost above them.
-private struct ToolbarFrost: NSViewRepresentable {
-    func makeNSView(context: Context) -> ToolbarFrostView { ToolbarFrostView() }
-
-    func updateNSView(_ view: ToolbarFrostView, context: Context) {
-        view.needsLayout = true
-    }
-}
-
-final class ToolbarFrostView: NSView {
-    private let frost = NSHostingView(rootView: Rectangle().fill(.bar))
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        frost.safeAreaRegions = []
-        addSubview(frost)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        needsLayout = true
-    }
-
-    override func layout() {
-        super.layout()
-        // Showing or hiding tabs resizes this view through the top safe-area inset.
-        // AppKit includes the tab row among its bottom titlebar accessories.
-        let accessoryHeight = window?.titlebarAccessoryViewControllers
-            .filter { $0.layoutAttribute == .bottom && !$0.isHidden }
-            .reduce(CGFloat.zero) { $0 + $1.view.frame.height } ?? 0
-        let inset = min(bounds.height, max(0, accessoryHeight))
-        frost.frame = NSRect(x: bounds.minX, y: bounds.minY + inset,
-                             width: bounds.width, height: bounds.height - inset)
     }
 }
 
