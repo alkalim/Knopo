@@ -4,7 +4,6 @@ import KnopoCore
 struct MainWindow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var nav: Navigator
-    let graphName: String
     let openGraphSettings: () -> Void
 
     /// User-set right-sidebar width as a fraction (0–1) of the detail area. Nil
@@ -73,11 +72,11 @@ struct MainWindow: View {
                 backTitles: backTitles, forwardTitles: forwardTitles,
                 goBack: { nav.goBack(steps: $0) },
                 goForward: { nav.goForward(steps: $0) })
-            ToolbarItem(placement: .navigation) {
-                GraphTitleSettingsControl(
-                    graphName: graphName, openSettings: openGraphSettings)
-            }
-            .separateGraphTitleBackground()
+        }
+        // The window title shows the graph name. Hiding it would also turn off
+        // the toolbar's scroll edge effect and bottom line on macOS 26 and later.
+        .toolbarTitleMenu {
+            Button("Graph Settings…", action: openGraphSettings)
         }
         .sheet(isPresented: $nav.searchPresented) {
             SearchPalette()
@@ -156,46 +155,6 @@ struct MainWindow: View {
             TagViewScreen(tag: tag)
         case .allPages:
             AllPagesView()
-        }
-    }
-}
-
-private struct GraphTitleSettingsControl: View {
-    let graphName: String
-    let openSettings: () -> Void
-    @State private var hovered = false
-    @FocusState private var gearFocused: Bool
-
-    var body: some View {
-        Text(graphName)
-            .font(.title3.weight(.semibold))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .layoutPriority(1)
-            .padding(.trailing, 22)
-            .overlay(alignment: .trailing) {
-                Button(action: openSettings) {
-                    Image(systemName: "gearshape")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Graph Settings")
-                .focused($gearFocused)
-                .opacity(hovered || gearFocused ? 1 : 0)
-                .accessibilityLabel("Graph Settings for \(graphName)")
-            }
-            .contentShape(Rectangle())
-            .onHover { hovered = $0 }
-    }
-}
-
-private extension ToolbarContent {
-    @ToolbarContentBuilder
-    func separateGraphTitleBackground() -> some ToolbarContent {
-        if #available(macOS 26.0, *) {
-            sharedBackgroundVisibility(.hidden)
-        } else {
-            self
         }
     }
 }

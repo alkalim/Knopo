@@ -34,8 +34,8 @@ The date picker includes common presets and custom Unicode date patterns;
 `d{ordinal}` adds the English `st`/`nd`/`rd`/`th` suffix.
 
 Settings that travel with a graph live in that graph's own sheet. Choose
-**File > Graph Settings…** (`⌥⌘,`), or hover over the graph name in the window
-toolbar and click its gear. There you can see or rebuild its search index.
+**File > Graph Settings…** (`⌥⌘,`), or click the graph name in the window
+toolbar and choose **Graph Settings…**. There you can see or rebuild its search index.
 Changes apply immediately. Zoom and
 line spacing remain repeatable View menu commands with keyboard shortcuts.
 

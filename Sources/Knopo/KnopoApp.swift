@@ -352,9 +352,7 @@ private struct GraphView: View {
     }
 
     var body: some View {
-        MainWindow(
-            graphName: app.store.root.lastPathComponent,
-            openGraphSettings: { graphSettingsPresented = true })
+        MainWindow(openGraphSettings: { graphSettingsPresented = true })
             // Name the scene after the graph: otherwise SwiftUI writes the app's
             // name, which `refreshTabTitle` reads back as this window's graph.
             .navigationTitle(app.store.root.lastPathComponent)
@@ -382,8 +380,7 @@ private struct GraphView: View {
 }
 
 /// Reaches the hosting NSWindow to (a) persist its frame across launches and
-/// (b) label the window's *tab* with the current page. The visible graph title
-/// is a leading toolbar item so it can reveal the Graph Settings gear.
+/// (b) label the window's *tab* with the current page.
 ///
 /// We persist the frame ourselves under a stable key rather than relying on
 /// SwiftUI's automatic autosave: that key is derived from the (private, nested)
@@ -468,7 +465,6 @@ struct WindowConfigurator: NSViewRepresentable {
         var configured = false
         var observers: [NSObjectProtocol] = []
         /// Re-hides the titlebar. Released with this coordinator.
-        var titleVisible: NSKeyValueObservation?
         weak var window: NSWindow?
         var graphName = ""
         var pageTitle = ""
@@ -510,9 +506,6 @@ struct WindowConfigurator: NSViewRepresentable {
             if nsView.window?.title != graphName {
                 nsView.window?.title = graphName
             }
-            if nsView.window?.titleVisibility != .hidden {
-                nsView.window?.titleVisibility = .hidden
-            }
             c.refreshTabTitle()
             // Our change may flip a sibling tab's mixed state too.
             if changed { NotificationCenter.default.post(name: Self.windowsChanged, object: nil) }
@@ -527,14 +520,6 @@ struct WindowConfigurator: NSViewRepresentable {
         coordinator.configured = true
         coordinator.window = window
         window.title = graphName
-        window.titleVisibility = .hidden
-        // SwiftUI unhides it whenever it re-applies the scene's name. Fixing
-        // that in `updateNSView` is a runloop turn late, and needs an update.
-        coordinator.titleVisible = window.observe(\.titleVisibility) { window, _ in
-            MainActor.assumeIsolated {
-                if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
-            }
-        }
         window.minSize = NSSize(width: 900, height: 560)
         // Native tabs: new scenes merge into one tab group, so `Cmd+T` ("New
         // Tab") works and tabs are available regardless of the system "prefer

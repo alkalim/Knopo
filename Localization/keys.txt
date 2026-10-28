@@ -67,9 +67,7 @@ Find Previous
 Find in Page
 Find in page	Find bar search field placeholder
 Forward
-Graph Settings
 Graph Settings Error
-Graph Settings for %@
 Graph Settings — %@
 Graph Settings…
 Gray	Block background color
