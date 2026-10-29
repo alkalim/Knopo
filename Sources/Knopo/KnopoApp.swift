@@ -352,7 +352,7 @@ private struct GraphView: View {
     }
 
     var body: some View {
-        MainWindow(openGraphSettings: { graphSettingsPresented = true })
+        MainWindow()
             // Name the scene after the graph: otherwise SwiftUI writes the app's
             // name, which `refreshTabTitle` reads back as this window's graph.
             .navigationTitle(app.store.root.lastPathComponent)

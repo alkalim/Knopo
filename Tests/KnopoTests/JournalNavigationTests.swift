@@ -194,7 +194,7 @@ import KnopoCore
         defer { app.shutdown() }
         let nav = Navigator(app: app)
         if !startInFeed { nav.navigate(to: .page(name: days[0])) }
-        let host = NSHostingView(rootView: MainWindow(openGraphSettings: {})
+        let host = NSHostingView(rootView: MainWindow()
             .environmentObject(app).environmentObject(nav))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 600),
                               styleMask: [.titled], backing: .buffered, defer: false)

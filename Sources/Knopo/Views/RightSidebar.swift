@@ -27,9 +27,10 @@ struct RightSidebar: View {
     private var columnSurface: some View {
         let column = paneList
             .background(Self.columnColor, ignoresSafeAreaEdges: [.horizontal, .bottom])
-        if Self.isMacOS26OrLater {
-            // The system toolbar background draws the line.
-            column
+        if #available(macOS 26.0, *) {
+            // The system toolbar background draws the line. Without an explicit
+            // style, cards scrolled under the toolbar here stay sharp.
+            column.scrollEdgeEffectStyle(.hard, for: .top)
         } else {
             column
                 .safeAreaInset(edge: .top, spacing: 0) {

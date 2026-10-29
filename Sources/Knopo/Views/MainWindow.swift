@@ -4,7 +4,6 @@ import KnopoCore
 struct MainWindow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var nav: Navigator
-    let openGraphSettings: () -> Void
 
     /// User-set right-sidebar width as a fraction (0–1) of the detail area. Nil
     /// until the divider is dragged (or a saved fraction is restored) — until
@@ -75,9 +74,6 @@ struct MainWindow: View {
         }
         // The window title shows the graph name. Hiding it would also turn off
         // the toolbar's scroll edge effect and bottom line on macOS 26 and later.
-        .toolbarTitleMenu {
-            Button("Graph Settings…", action: openGraphSettings)
-        }
         .sheet(isPresented: $nav.searchPresented) {
             SearchPalette()
                 .environmentObject(app)
