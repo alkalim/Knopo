@@ -11,6 +11,7 @@ struct MainWindow: View {
     /// makes it scale with the window and restore correctly at any window size.
     @State private var rightFraction: CGFloat?
     @State private var dragStartWidth: CGFloat?
+    @GestureState private var isDraggingDivider = false
     @StateObject private var sidebarTransition = SidebarTransition.State()
 
     private let mainMinWidth: CGFloat = 320
@@ -120,9 +121,13 @@ struct MainWindow: View {
                         // against the screen, not the handle — which itself
                         // moves as the panel resizes (local space oscillates).
                         DragGesture(coordinateSpace: .global)
+                            .updating($isDraggingDivider) { _, dragging, _ in dragging = true }
                             .onChanged { value in
                                 let base = dragStartWidth ?? rightWidth(available: available)
-                                if dragStartWidth == nil { dragStartWidth = base }
+                                if dragStartWidth == nil {
+                                    OutlineScrollAnchor.beginDividerResize(in: sidebarTransition.window)
+                                    dragStartWidth = base
+                                }
                                 let maxRight = max(rightMinWidth, available - mainMinWidth)
                                 // Dragging left (negative translation) grows the panel.
                                 let width = min(max(base - value.translation.width,
@@ -131,12 +136,18 @@ struct MainWindow: View {
                                 // later window resizes scale the panel with it.
                                 rightFraction = available > 0 ? width / available : nil
                             }
-                            .onEnded { _ in
-                                dragStartWidth = nil
-                                app.persistRightPaneFraction(rightFraction)
-                            }
                     )
             )
+            .onChange(of: isDraggingDivider) { _, dragging in
+                guard !dragging, dragStartWidth != nil else { return }
+                dragStartWidth = nil
+                OutlineScrollAnchor.endDividerResize(in: sidebarTransition.window)
+                app.persistRightPaneFraction(rightFraction)
+            }
+            .onDisappear {
+                dragStartWidth = nil
+                OutlineScrollAnchor.endDividerResize(in: sidebarTransition.window)
+            }
     }
 
     @ViewBuilder

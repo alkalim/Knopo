@@ -92,6 +92,12 @@ import KnopoCore
         let controller = OutlineEditorController(app: app, nav: Navigator(app: app))
         controller.inPane = true
         let table = controller.tableView
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
+        window.contentView = content
+        content.addSubview(table)
+        defer { window.contentView = nil }
         table.frame.size.width = 800
         controller.present(pageName: "Host", zoom: nil)
 
@@ -99,10 +105,13 @@ import KnopoCore
             if let text = view as? RenderedTextView { return text }
             return view.subviews.compactMap { textView(in: $0) }.first
         }
-        func rightEdge() throws -> CGFloat {
+        func renderedText() throws -> NSAttributedString {
             let cell = try #require(controller.tableView(
                 table, viewFor: table.tableColumns.first, row: 0))
-            let text = try #require(textView(in: cell)?.attributedString())
+            return try #require(textView(in: cell)?.attributedString())
+        }
+        func rightEdge() throws -> CGFloat {
+            let text = try renderedText()
             var geometry: BlockRenderer.TableGeometry?
             text.enumerateAttribute(BlockRenderer.tableKey,
                                     in: NSRange(location: 0, length: text.length)) { value, _, _ in
@@ -119,6 +128,17 @@ import KnopoCore
         let resized = try rightEdge()
         #expect(abs(original - resized - 350) < 0.5)
         #expect(resized < OutlineRowCell.contentWidth(forDepth: 0, rowWidth: 450))
+
+        source.blocks[0].content = "| A | B |\n| --- | --- |\n| changed | two |"
+        store.updatePage(source)
+        controller.invalidateWidthMeasurement()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        // A width check must keep the existing render when its width matches.
+        #expect(try renderedText().string.contains("one"))
+        controller.present(pageName: "Host", zoom: nil)
+        #expect(try renderedText().string.contains("changed"))
     }
 
     @Test(arguments: [CGFloat(420), 700], ["block", "page", "nested", "child"])

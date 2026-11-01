@@ -29,4 +29,8 @@ done
 
 # AppKit tests share the main thread and application state. Concurrent cases
 # can delay highlight checks until their animations have already finished.
-exec swift test --no-parallel "${CLT_FLAGS[@]}" "$@"
+# Match the app bundle's SDK linkage. Xcode 27 otherwise records the
+# deployment target as the SDK and tests older AppKit/SwiftUI behavior.
+SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+exec swift test --no-parallel "${CLT_FLAGS[@]}" \
+  -Xswiftc -Xclang-linker -Xswiftc "-isysroot$SDK_PATH" "$@"

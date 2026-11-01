@@ -53,11 +53,11 @@ private struct JournalDay: View {
     let outlineWidth: CGFloat
 
     var body: some View {
-        JournalDaySection(day: day, outlineWidth: outlineWidth)
-        // More room above the separator (between the day's last block and the
-        // rule) than below it, so the rule reads as introducing the next day
-        // rather than crowding this one.
-        Divider().padding(.top, 36).padding(.bottom, 16)
+        VStack(alignment: .leading, spacing: 0) {
+            JournalDaySection(day: day, outlineWidth: outlineWidth)
+            // More room above the separator than below it.
+            Divider().padding(.top, 36).padding(.bottom, 16)
+        }
     }
 }
 

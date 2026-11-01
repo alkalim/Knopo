@@ -147,11 +147,11 @@ import KnopoCore
         func checkRows(_ label: String) throws {
             let tables = descendants(host, OutlineTableView.self)
             try #require(!tables.isEmpty && tables.count <= 5)
-            #expect(descendants(host, OutlineRowCell.self).count < 100)
+            #expect(descendants(host, OutlineRowCell.self).count < 100, "\(label)")
             for table in tables {
                 // Allow retained cells and a generous prefetch margin, but
                 // never a full 400-row page for this 700-point viewport.
-                #expect(descendants(table, OutlineRowCell.self).count < 100)
+                #expect(descendants(table, OutlineRowCell.self).count < 100, "\(label)")
                 #expect(table.rows(in: table.bounds).length == 400)
                 let visible = table.rows(in: table.visibleRect.intersection(table.bounds))
                 if visible.location != NSNotFound {

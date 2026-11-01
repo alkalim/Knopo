@@ -87,6 +87,11 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
         // and embeds on every resize frame unless the data also changed.
         let refreshContent = controller.initialLayoutWidth == initialWidth
             || context.coordinator.dataVersion != dataVersion
+        let widthChanged = controller.initialLayoutWidth != initialWidth
+        if widthChanged {
+            // SwiftUI can update this input before it resizes the scroll view.
+            OutlineScrollAnchor.preserve(beforeResizing: nsView, widthChanged: true)
+        }
         context.coordinator.dataVersion = dataVersion
         controller.initialLayoutWidth = initialWidth
         controller.present(pageName: pageName, zoom: zoom, refreshContent: refreshContent)
@@ -198,7 +203,10 @@ final class OutlineContainerView: NSView {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
-        if abs(newSize.width - frame.width) > 0.5 { cancelHeightAnimation() }
+        if abs(newSize.width - frame.width) > 0.5 {
+            OutlineScrollAnchor.preserve(beforeResizing: self)
+            cancelHeightAnimation()
+        }
         super.setFrameSize(newSize)
     }
 }
@@ -356,23 +364,48 @@ final class OutlineTableView: NSTableView, NSMenuItemValidation {
     }
 
     private var preparingVisibleRows = false
+
+    override func tile() {
+        let wasPreparing = preparingVisibleRows
+        preparingVisibleRows = true
+        defer { preparingVisibleRows = wasPreparing }
+        super.tile()
+    }
+
+    @discardableResult
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        // NSTableView.tile scrolls its origin into view while resizing columns.
+        // These tables share a scroll view, so an offscreen day must not move it.
+        guard !usesSharedScrollView || (!preparingVisibleRows && updateDepth == 0) else { return false }
+        return super.scrollToVisible(rect)
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
-        if abs(newSize.width - frame.width) > 0.5 { blockEditAnimation.cancel() }
+        if abs(newSize.width - frame.width) > 0.5 {
+            OutlineScrollAnchor.preserve(beforeResizing: self)
+            blockEditAnimation.cancel()
+            (delegate as? OutlineEditorController)?.invalidateWidthMeasurement()
+        }
+        let wasPreparing = preparingVisibleRows
+        preparingVisibleRows = true
         super.setFrameSize(newSize)
+        preparingVisibleRows = wasPreparing
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        OutlineScrollAnchor.register(self)
+        if window != nil { (delegate as? OutlineEditorController)?.invalidateWidthMeasurement() }
         if window == nil { blockEditAnimation.cancel() }
     }
 
     override func layout() {
+        let wasPreparing = preparingVisibleRows
+        preparingVisibleRows = true
         if let column = tableColumns.first, abs(column.width - bounds.width) > 0.5 {
             column.width = bounds.width
         }
         updateDepth += 1
-        let wasPreparing = preparingVisibleRows
-        preparingVisibleRows = true
         super.layout()
         preparingVisibleRows = wasPreparing
         updateDepth -= 1
@@ -392,7 +425,9 @@ final class OutlineTableView: NSTableView, NSMenuItemValidation {
         guard usesSharedScrollView, preparingVisibleRows || updateDepth > 0 else {
             return super.rows(in: rect)
         }
-        let visible = visibleRect.intersection(bounds)
+        let viewport = enclosingScrollView.map { convert($0.contentView.bounds, from: $0.contentView) }
+            ?? visibleRect
+        let visible = viewport.intersection(bounds)
         guard !visible.isEmpty else { return NSRange(location: NSNotFound, length: 0) }
         let buffered = visible.insetBy(dx: 0, dy: -visible.height / 2)
         let clipped = rect.intersection(buffered)
@@ -401,6 +436,7 @@ final class OutlineTableView: NSTableView, NSMenuItemValidation {
     }
 
     override func viewWillDraw() {
+        (delegate as? OutlineEditorController)?.refreshVisibleWidth()
         let wasPreparing = preparingVisibleRows
         preparingVisibleRows = true
         defer { preparingVisibleRows = wasPreparing }
@@ -453,6 +489,7 @@ final class OutlineEditorController: NSObject {
         var marker: OutlineNumbering.Marker?
         var geometry: OutlineMarkerLayout.Geometry
         var rendered: NSAttributedString
+        var renderedWidth: CGFloat
         /// Source represented by `rendered`. The focused row's live block is
         /// updated on every keystroke while its hidden preview intentionally is
         /// not, so `block.content` alone cannot validate preview reuse.
@@ -612,7 +649,8 @@ final class OutlineEditorController: NSObject {
     private var renderedWithWeight = BlockRenderer.contentWeight
     private var renderedWithDateFormat: JournalDateFormat
     private var widthRefreshScheduled = false
-    private var needsWidthRefreshAfterLiveResize = false
+    private var measuredTableWidth: CGFloat?
+    private var needsFullWidthRefresh = false
 
     /// Bullet drag-and-drop (SPEC §5.4). The pasteboard carries only a marker —
     /// the dragged blocks live here, and drops are accepted from this controller
@@ -686,7 +724,7 @@ final class OutlineEditorController: NSObject {
             self?.revealIfPossible()
             self?.autocomplete.reposition()
         }
-        tableView.onLiveResizeEnd = { [weak self] in self?.liveResizeDidEnd() }
+        tableView.onLiveResizeEnd = { [weak self] in self?.widthDidChange() }
         tableView.onKeyDown = { [weak self] in self?.handleSelectionKeyDown($0) ?? false }
         tableView.onCut = { [weak self] in self?.cutSelection() }
         tableView.onCopy = { [weak self] in self?.copySelection() }
@@ -1153,6 +1191,7 @@ final class OutlineEditorController: NSObject {
             target.origin.y -= runUp
             target.size.height += runUp
         }
+        OutlineScrollAnchor.cancel(in: tableView)
         tableView.scrollToVisible(target)
         tableView.layoutSubtreeIfNeeded()
         revealRequest?.rowMinY = tableView.rect(ofRow: row).minY
@@ -1191,6 +1230,7 @@ final class OutlineEditorController: NSObject {
             let rendered = cachedRender(row.block, contentWidth: contentWidth(for: row))
             guard !rendered.isEqual(to: row.rendered) else { continue }
             rows[index].rendered = rendered
+            rows[index].renderedWidth = contentWidth(for: row)
             reloadRow(index)
         }
     }
@@ -1238,13 +1278,13 @@ final class OutlineEditorController: NSObject {
                 && old?.renderedProperties == visibleRow.block.properties
                 && old?.depth == visibleRow.depth
                 && !dependsOnOtherBlocks
-                && old.map { renderSignature(for: $0.block, contentWidth: contentWidth(for: $0)) }
+                && old.map { renderSignature(for: $0.block, contentWidth: $0.renderedWidth) }
                     == renderSignature(for: visibleRow.block, contentWidth: width)
             let rendered = canReuse ? old!.rendered
                 : cachedRender(visibleRow.block, contentWidth: width)
             return Row(block: visibleRow.block, depth: visibleRow.depth, path: visibleRow.path,
                        hasChildren: visibleRow.hasChildren, marker: markers[visibleRow.id],
-                       geometry: layout, rendered: rendered,
+                       geometry: layout, rendered: rendered, renderedWidth: width,
                        renderedContent: visibleRow.block.content,
                        renderedProperties: visibleRow.block.properties,
                        renderDependsOnOtherBlocks: dependsOnOtherBlocks)
@@ -1276,10 +1316,10 @@ final class OutlineEditorController: NSObject {
     var initialLayoutWidth: CGFloat?
 
     private var rowLayoutWidth: CGFloat {
-        // SwiftUI probes a detached table at 100 points before placing it.
-        // Shared scroll views supply the actual available width.
-        if tableView.window == nil, let initialLayoutWidth { return initialLayoutWidth }
-        return max(tableView.bounds.width, 100)
+        // Keep the width hint through attachment and SwiftUI's initial probes.
+        // The deferred measurement records the table's actual placed width.
+        if let measuredTableWidth { return max(100, measuredTableWidth) }
+        return max(initialLayoutWidth ?? tableView.bounds.width, 100)
     }
 
     /// Hash of every input `renderBlock` depends on. Returns nil for blocks
@@ -1974,57 +2014,97 @@ final class OutlineEditorController: NSObject {
 
     /// Re-renders tables and embeds when their available width changes.
     /// An embed can contain tables at any depth.
-    private func rerenderWidthDependentRows() -> IndexSet {
-        var changed = IndexSet()
-        for index in rows.indices {
-            let content = rows[index].block.content
-            guard BlockKind.classify(content).isTable || content.contains("{{embed") else { continue }
-            let rendered = cachedRender(rows[index].block, contentWidth: contentWidth(for: rows[index]))
-            guard rendered !== rows[index].rendered else { continue }
-            rows[index].rendered = rendered
-            if rows[index].block.id != focusedBlockID { changed.insert(index) }
-        }
-        return changed
+    private func rerenderWidthDependentRow(_ index: Int) -> Bool {
+        let row = rows[index]
+        let width = contentWidth(for: row)
+        guard row.renderedWidth != width else { return false }
+        guard BlockKind.classify(row.block.content).isTable
+            || (row.block.content.contains("{{embed")
+                && containsTable(row.rendered, in: NSRange(location: 0, length: row.rendered.length))) else { return false }
+        let rendered = cachedRender(row.block, contentWidth: width)
+        guard rendered !== row.rendered else { return false }
+        rows[index].rendered = rendered
+        rows[index].renderedWidth = width
+        return row.block.id != focusedBlockID
     }
 
-    private func widthDidChange() {
-        guard !isLiveResizing else {
-            needsWidthRefreshAfterLiveResize = true
-            return
-        }
+    private var widthNeedsMeasurement: Bool {
+        measuredTableWidth.map { abs($0 - max(100, tableView.bounds.width)) > 0.5 } ?? true
+    }
+
+    func invalidateWidthMeasurement() {
+        // Queue work even when SwiftUI returns to an already measured width.
+        // AppKit may have replaced row heights during an intermediate probe.
+        needsFullWidthRefresh = true
         scheduleWidthRefresh()
     }
 
-    private var isLiveResizing: Bool {
-        tableView.inLiveResize || tableView.window?.inLiveResize == true
+    func refreshVisibleWidth() {
+        guard needsFullWidthRefresh,
+              measuredTableWidth == nil || !OutlineScrollAnchor.isLiveResizing(tableView),
+              let scroll = tableView.enclosingScrollView,
+              tableView.convert(scroll.contentView.bounds, from: scroll.contentView).intersects(tableView.bounds) else { return }
+        // A newly exposed day can attach after the queued width pass. Give its
+        // first frame correct heights. Established tables stay deferred.
+        if measuredTableWidth == nil { refreshRowsForWidth() }
+        else { scheduleWidthRefresh() }
     }
 
-    private func liveResizeDidEnd() {
-        guard needsWidthRefreshAfterLiveResize else { return }
-        needsWidthRefreshAfterLiveResize = false
+    private func widthDidChange() {
+        guard needsFullWidthRefresh || widthNeedsMeasurement else { return }
         scheduleWidthRefresh()
     }
 
     private func scheduleWidthRefresh() {
         guard !widthRefreshScheduled else { return }
         widthRefreshScheduled = true
-        // Deferred: noteHeightOfRows inside layout would recurse.
+        // Defer row-height changes until SwiftUI has finished placing its views.
+        // Invalidating intrinsic height from setFrameSize can keep the native
+        // window resize in a loop that recreates journal days.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.widthRefreshScheduled = false
-            guard !self.isLiveResizing else {
-                self.needsWidthRefreshAfterLiveResize = true
-                return
-            }
             self.refreshRowsForWidth()
         }
     }
 
     private func refreshRowsForWidth() {
-        let changedRenders = rerenderWidthDependentRows()
-        let changedHeights = (0..<min(rows.count, tableView.numberOfRows)).filter {
-            abs(tableView.rect(ofRow: $0).height
-                - self.tableView(tableView, heightOfRow: $0)) > 0.5
+        guard tableView.window != nil else {
+            needsFullWidthRefresh = true
+            return
+        }
+        let viewport = tableView.enclosingScrollView.map {
+            tableView.convert($0.contentView.bounds, from: $0.contentView)
+        } ?? tableView.bounds
+        let live = OutlineScrollAnchor.isLiveResizing(tableView)
+        // Lazy journal days keep their old height until they become visible.
+        // Other outlines finish measuring after the drag, before the next scroll.
+        if !viewport.intersects(tableView.bounds), inJournalFeed || live {
+            needsFullWidthRefresh = true
+            return
+        }
+        measuredTableWidth = max(100, tableView.bounds.width)
+        let count = min(rows.count, tableView.numberOfRows)
+        needsFullWidthRefresh = live
+        let first = needsFullWidthRefresh ? max(0, tableView.row(at: NSPoint(x: 0, y: viewport.minY))) : 0
+        var remaining = needsFullWidthRefresh ? viewport.height * 1.5 : CGFloat.infinity
+        var changedRenders = IndexSet()
+        var changedHeights: [Int] = []
+        // Use new heights to fill the viewport. Old heights underestimate how
+        // many rows become visible when a narrow window is widened.
+        for index in min(first, count)..<count {
+            guard remaining > 0 else { break }
+            if rerenderWidthDependentRow(index) { changedRenders.insert(index) }
+            let old = tableView.rect(ofRow: index)
+            let height = self.tableView(tableView, heightOfRow: index)
+            if abs(old.height - height) > 0.5 { changedHeights.append(index) }
+            let clipped = index == first ? max(0, viewport.minY - old.minY) : 0
+            remaining -= max(OutlineRowCell.minRowHeight / 2, height - clipped)
+        }
+        // Only anchor an actual change. Newly attached days often already
+        // have the right heights and must not interrupt normal scrolling.
+        if !changedHeights.isEmpty || !changedRenders.isEmpty {
+            OutlineScrollAnchor.preserve(beforeResizing: tableView, widthChanged: true)
         }
         // Keep the editor in its cell, including any marked text. Height
         // updates do not need to reset its content, focus, or scroll position.
@@ -2033,8 +2113,15 @@ final class OutlineEditorController: NSObject {
             tableView.reloadData(forRowIndexes: changedRenders,
                                  columnIndexes: IndexSet(integer: 0))
         }
-        tableView.layoutSubtreeIfNeeded()
         revealIfPossible()
+    }
+
+    func scrollAnchorBlock(at row: Int) -> UUID? {
+        rows.indices.contains(row) ? rows[row].block.id : nil
+    }
+
+    func scrollAnchorRow(for blockID: UUID) -> Int? {
+        rows.firstIndex { $0.block.id == blockID }
     }
 
     // MARK: - Focus and the shared editor
@@ -2060,6 +2147,7 @@ final class OutlineEditorController: NSObject {
            let prevIndex = rows.firstIndex(where: { $0.block.id == previous }) {
             rows[prevIndex].rendered = cachedRender(rows[prevIndex].block,
                                                     contentWidth: contentWidth(for: rows[prevIndex]))
+            rows[prevIndex].renderedWidth = contentWidth(for: rows[prevIndex])
             reloadRow(prevIndex)
         }
     }
@@ -2145,6 +2233,7 @@ final class OutlineEditorController: NSObject {
         }
         if let index = rows.firstIndex(where: { $0.block.id == id }) {
             rows[index].rendered = cachedRender(rows[index].block, contentWidth: contentWidth(for: rows[index]))
+            rows[index].renderedWidth = contentWidth(for: rows[index])
             reloadRow(index)
         }
     }
