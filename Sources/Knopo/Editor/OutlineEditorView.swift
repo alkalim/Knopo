@@ -71,7 +71,14 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
         controller.applyPaneRole()
         context.coordinator.controller = controller
         context.coordinator.find = nav.find
-        nav.find.register(controller)
+        container.onWindowChange = { [weak controller, weak find = nav.find] attached in
+            guard let controller else { return }
+            if attached { find?.register(controller) }
+            else {
+                controller.endEditing()
+                find?.unregister(controller)
+            }
+        }
         controller.initialLayoutWidth = initialWidth
         if let initialWidth {
             // Avoid a full text-layout pass at the table's zero-width default.
@@ -124,6 +131,7 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
 /// Animates the outline's height while AppKit rows keep their final geometry.
 final class OutlineContainerView: NSView {
     let tableView: OutlineTableView
+    var onWindowChange: ((Bool) -> Void)?
     private var heightAnimationID: UUID?
     var isAnimatingHeight: Bool { heightAnimationID != nil }
     @objc private dynamic var animatedHeight: CGFloat = 0 {
@@ -199,6 +207,7 @@ final class OutlineContainerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        onWindowChange?(window != nil)
         if window == nil { cancelHeightAnimation() }
     }
 
@@ -635,7 +644,8 @@ final class OutlineEditorController: NSObject {
     }
 
     private func undoEditing(before: OutlineEditorSnapshot?, after: OutlineEditorSnapshot?) -> OutlineEditorUndo {
-        OutlineEditorUndo(owner: self, page: pageName, before: before, after: after)
+        OutlineEditorUndo(owner: self, page: pageName, before: before, after: after,
+                          restore: inJournalFeed ? JournalDayHost.restorer(for: pageName, containing: tableView) : nil)
     }
 
     /// True while the link panel holds focus; suppresses end-of-edit teardown
@@ -3328,7 +3338,7 @@ extension OutlineEditorController: FindParticipant {
         return findMatches.count
     }
 
-    func findSetCurrent(_ localIndex: Int?) {
+    func findSetCurrent(_ localIndex: Int?, reveal: Bool) {
         findCurrentLocal = localIndex
         let newCurrentRow = localIndex.flatMap {
             findMatches.indices.contains($0) ? findMatches[$0].row : nil
@@ -3337,7 +3347,7 @@ extension OutlineEditorController: FindParticipant {
         // the whole table.
         reloadFindRows(Set([findCurrentRow, newCurrentRow].compactMap { $0 }))
         findCurrentRow = newCurrentRow
-        if let newCurrentRow {
+        if reveal, let newCurrentRow {
             // Defer: the just-reloaded row's rect is briefly stale, so scrolling
             // immediately can land short (notably in the journal's shared scroll).
             DispatchQueue.main.async { [weak self] in

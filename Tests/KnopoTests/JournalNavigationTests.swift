@@ -28,7 +28,7 @@ import KnopoCore
         }
     }
 
-    private func rig(todayBlocks: Int) throws -> Rig {
+    private func rig(todayBlocks: Int, wholeWindow: Bool = false) throws -> Rig {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-journal-nav-\(UUID().uuidString)")
         let store = try GraphStore(root: root)
@@ -42,8 +42,8 @@ import KnopoCore
         }
         let app = AppState(store: store)
         let nav = Navigator(app: app)
-        let host = NSHostingView(
-            rootView: JournalView().environmentObject(app).environmentObject(nav))
+        let content = wholeWindow ? AnyView(MainWindow()) : AnyView(JournalView())
+        let host = NSHostingView(rootView: content.environmentObject(app).environmentObject(nav))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 450),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
@@ -57,12 +57,6 @@ import KnopoCore
             + view.subviews.flatMap { descendants($0, of: type) }
     }
 
-    /// The pages the feed has an outline for; the lazy stack drops the far ones.
-    private func loadedPages(in host: NSView) -> [String] {
-        descendants(host, of: OutlineTableView.self)
-            .compactMap { ($0.delegate as? OutlineEditorController)?.pageName }
-    }
-
     /// Which page's outline an editor sits in, via its table's controller.
     private func outlinePage(of editor: NSView) -> String? {
         var view: NSView? = editor
@@ -73,6 +67,130 @@ import KnopoCore
             view = current.superview
         }
         return nil
+    }
+
+    @Test func leavingTheJournalCommitsTheCurrentUndoSession() async throws {
+        let rig = try rig(todayBlocks: 6, wholeWindow: true)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        let today = JournalDate.today().pageName
+        let original = rig.app.document(for: today).blocks[0]
+        do {
+            let table = try #require(descendants(rig.host, of: OutlineTableView.self).first {
+                ($0.delegate as? OutlineEditorController)?.pageName == today
+            })
+            let controller = try #require(table.delegate as? OutlineEditorController)
+            controller.focusBlock(original.id, selection: NSRange(location: 0, length: 0))
+            let editor = try #require(rig.window.firstResponder as? BlockEditorTextView)
+            editor.string = "An edit made before leaving the journal"
+            editor.didChangeText()
+        }
+        rig.nav.navigate(to: .page(name: "Another page"))
+        try await rig.settle()
+        #expect(rig.app.document(for: today).blocks[0].content != original.content)
+        rig.app.undo()
+        #expect(rig.app.document(for: today).blocks[0].content == original.content)
+    }
+
+    @Test(arguments: [0, -1])
+    func undoFromOlderEntriesRestoresTheEditedDay(dayOffset: Int) async throws {
+        let rig = try rig(todayBlocks: 6)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        let today = JournalDate.today().adding(days: dayOffset).pageName
+        let table = try #require(descendants(rig.host, of: OutlineTableView.self).first {
+            ($0.delegate as? OutlineEditorController)?.pageName == today
+        })
+        let controller = try #require(table.delegate as? OutlineEditorController)
+        controller.focusBlock(rig.app.document(for: today).blocks[0].id,
+                              selection: NSRange(location: 3, length: 0))
+        controller.editorSplit(atUTF16Offset: 3)
+        try await rig.settle()
+        rig.window.makeFirstResponder(nil)
+        try await Task.sleep(for: .milliseconds(600))
+        rig.scroll.contentView.scroll(to: NSPoint(x: 0, y: 3_000))
+        rig.scroll.reflectScrolledClipView(rig.scroll.contentView)
+        try await rig.settle()
+        rig.app.undo()
+        try await rig.settle()
+        let editor = try #require(rig.window.firstResponder as? BlockEditorTextView)
+        #expect(outlinePage(of: editor) == today)
+        #expect(!editor.visibleRect.isEmpty)
+    }
+
+    @Test(arguments: [1, 10])
+    func findExcludesRecycledDays(day: Int) async throws {
+        let rig = try rig(todayBlocks: 6)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        try await Task.sleep(for: .milliseconds(600))
+        rig.window.makeFirstResponder(nil)
+        let query = "Entry \(day),"
+        rig.nav.findActive = true
+        rig.nav.findQuery = query
+        try await rig.settle()
+        rig.scroll.contentView.scroll(to: NSPoint(x: 0, y: 3_000))
+        rig.scroll.reflectScrolledClipView(rig.scroll.contentView)
+        try await rig.settle()
+        let expected = descendants(rig.host, of: OutlineTableView.self).reduce(0) { total, table in
+            guard let controller = table.delegate as? OutlineEditorController else { return total }
+            return total + rig.app.document(for: controller.pageName).blocks.filter {
+                $0.content.contains(query)
+            }.count
+        }
+        #expect(rig.nav.findMatchCount == expected)
+        if day == 10 { #expect(expected > 0) }
+    }
+
+    @Test func returningToTodayKeepsTheCurrentResponder() async throws {
+        let rig = try rig(todayBlocks: 6)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        try await Task.sleep(for: .milliseconds(600))
+        let reader = NSTextView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        rig.host.addSubview(reader)
+        rig.window.makeFirstResponder(reader)
+        let blockCount = rig.app.document(for: JournalDate.today().pageName).blocks.count
+        for y: CGFloat in [6_000, 0] {
+            rig.scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            rig.scroll.reflectScrolledClipView(rig.scroll.contentView)
+            try await rig.settle()
+            #expect(rig.window.firstResponder === reader)
+        }
+        #expect(rig.app.document(for: JournalDate.today().pageName).blocks.count == blockCount)
+    }
+
+    @Test func resizePreservesMarkedTextInAnOlderDay() async throws {
+        let rig = try rig(todayBlocks: 6)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        try await Task.sleep(for: .milliseconds(600))
+        rig.window.makeFirstResponder(nil)
+        rig.scroll.contentView.scroll(to: NSPoint(x: 0, y: 800))
+        rig.scroll.reflectScrolledClipView(rig.scroll.contentView)
+        try await rig.settle()
+        let table = try #require(descendants(rig.host, of: OutlineTableView.self).first {
+            ($0.delegate as? OutlineEditorController)?.pageName != JournalDate.today().pageName
+                && !$0.visibleRect.isEmpty
+        })
+        let controller = try #require(table.delegate as? OutlineEditorController)
+        let block = rig.app.document(for: controller.pageName).blocks[0]
+        controller.focusBlock(block.id, selection: NSRange(location: 0, length: 0))
+        try await rig.settle()
+        let editor = try #require(rig.window.firstResponder as? BlockEditorTextView)
+        editor.setMarkedText("かな", selectedRange: NSRange(location: 1, length: 0),
+                             replacementRange: NSRange(location: 0, length: 0))
+        let text = editor.string
+        let selection = editor.selectedRange()
+        for width: CGFloat in [360, 900, 700] {
+            rig.window.setContentSize(NSSize(width: width, height: 450))
+            try await rig.settle()
+            #expect(rig.window.firstResponder === editor)
+            #expect(editor.hasMarkedText())
+            #expect(editor.string == text)
+            #expect(editor.selectedRange() == selection)
+        }
+        editor.unmarkText()
     }
 
     /// Opening a search hit is a reading action, today's journal included. Its
@@ -265,10 +383,8 @@ import KnopoCore
             rig.scroll.contentView.scroll(to: NSPoint(x: 0, y: 6_000))
             rig.scroll.reflectScrolledClipView(rig.scroll.contentView)
             try await rig.settle()
-            // Deep in the older entries, where the lazy stack used to drop
-            // today's editor and leave the request unanswered.
+            // Deep in older entries, away from today's writing block.
             #expect(rig.scroll.documentVisibleRect.minY > 1_000)
-            #expect(loadedPages(in: rig.host).contains(today.pageName))
 
             rig.nav.goToJournal()
             try await rig.settle()

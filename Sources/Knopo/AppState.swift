@@ -448,7 +448,11 @@ final class AppState: ObservableObject {
     }
 
     private func restoreEditor(_ state: OutlineEditorUndo?, undo: Bool) {
-        if let state { state.owner?.restoreEditing(undo ? state.before : state.after, onPage: state.page) }
+        if let state {
+            let snapshot = undo ? state.before : state.after
+            if let restore = state.restore { restore(snapshot) }
+            else { state.owner?.restoreEditing(snapshot, onPage: state.page) }
+        }
         focusedOutline?.rebaseEditingAfterUndo()
     }
 

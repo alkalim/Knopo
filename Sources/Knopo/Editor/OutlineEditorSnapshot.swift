@@ -21,4 +21,5 @@ struct OutlineEditorUndo {
     var page: String
     var before: OutlineEditorSnapshot?
     var after: OutlineEditorSnapshot?
+    var restore: ((OutlineEditorSnapshot?) -> Void)?
 }

@@ -9,8 +9,8 @@ protocol FindParticipant: AnyObject {
     /// Recompute local matches for `query`; return the match count, clear current.
     func findUpdate(query: String) -> Int
     /// Mark which local match (if any) is the window-global current one:
-    /// highlight it and, when non-nil, scroll it into view.
-    func findSetCurrent(_ localIndex: Int?)
+    /// highlight it and optionally scroll it into view.
+    func findSetCurrent(_ localIndex: Int?, reveal: Bool)
     /// Drop all find highlighting.
     func findClear()
 }
@@ -34,13 +34,15 @@ final class FindCoordinator {
 
     func register(_ p: FindParticipant) {
         boxes.removeAll { $0.value == nil }
-        if !boxes.contains(where: { $0.value === p }) { boxes.append(Box(p)) }
-        if active { recompute() }
+        guard !boxes.contains(where: { $0.value === p }) else { return }
+        boxes.append(Box(p))
+        if active { updateParticipants() }
     }
 
     func unregister(_ p: FindParticipant) {
         boxes.removeAll { $0.value == nil || $0.value === p }
-        if active { recompute() }
+        p.findClear()
+        if active { updateParticipants() }
     }
 
     /// Driven from the outline's updateNSView. Dedupes by query/step token, so
@@ -71,6 +73,25 @@ final class FindCoordinator {
         applyCurrent()
     }
 
+    /// Scrolling changes membership without starting a new search or revealing a match.
+    private func updateParticipants() {
+        var current: FindParticipant?
+        var local = globalIndex
+        for (participant, count) in zip(ordered, counts) {
+            if local < count { current = participant; break }
+            local -= count
+        }
+        let oldCounts = Dictionary(uniqueKeysWithValues: zip(ordered.map(ObjectIdentifier.init), counts))
+        ordered = live().sorted { $0.findSortKey > $1.findSortKey }
+        counts = ordered.map { oldCounts[ObjectIdentifier($0)] ?? $0.findUpdate(query: query) }
+        if let current, let index = ordered.firstIndex(where: { $0 === current }) {
+            globalIndex = counts.prefix(index).reduce(0, +) + local
+        } else {
+            globalIndex = 0
+        }
+        applyCurrent(reveal: false)
+    }
+
     private func step(forward: Bool) {
         let total = counts.reduce(0, +)
         guard total > 0 else { return }
@@ -78,7 +99,7 @@ final class FindCoordinator {
         applyCurrent()
     }
 
-    private func applyCurrent() {
+    private func applyCurrent(reveal: Bool = true) {
         let total = counts.reduce(0, +)
         var remaining = globalIndex
         var ownerIdx = -1, local = -1
@@ -89,7 +110,7 @@ final class FindCoordinator {
             }
         }
         for (i, p) in ordered.enumerated() {
-            p.findSetCurrent(i == ownerIdx ? local : nil)
+            p.findSetCurrent(i == ownerIdx ? local : nil, reveal: reveal)
         }
         report(count: total, ordinal: total == 0 ? 0 : globalIndex + 1)
     }

@@ -533,8 +533,21 @@ enum BlockRenderer {
     /// metrics stops emoji (whose substituted font carries extra leading) from
     /// making a line taller in one render mode than the other.
     static func lineHeight(forSource source: String) -> CGFloat {
-        (NSLayoutManager().defaultLineHeight(for: pinnedFont(forSource: source)) * lineHeightScale)
-            .rounded()
+        lineHeight(for: pinnedFont(forSource: source))
+    }
+
+    private static let lineHeights: NSCache<NSFont, NSNumber> = {
+        let cache = NSCache<NSFont, NSNumber>()
+        cache.countLimit = 64
+        return cache
+    }()
+
+    private static func lineHeight(for font: NSFont) -> CGFloat {
+        if let height = lineHeights.object(forKey: font) { return CGFloat(truncating: height) }
+        // Font metrics do not depend on width. Reuse them across rows and resizes.
+        let height = (NSLayoutManager().defaultLineHeight(for: font) * lineHeightScale).rounded()
+        lineHeights.setObject(NSNumber(value: Double(height)), forKey: font)
+        return height
     }
 
     /// Applies a fixed `lineHeight` across the string, preserving any existing
@@ -579,8 +592,7 @@ enum BlockRenderer {
             string.enumerateAttribute(.font, in: para) { value, _, _ in
                 if let f = value as? NSFont, f.pointSize > maxSize { maxSize = f.pointSize }
             }
-            let height = (NSLayoutManager()
-                .defaultLineHeight(for: .systemFont(ofSize: maxSize)) * lineHeightScale).rounded()
+            let height = lineHeight(for: .systemFont(ofSize: maxSize))
             string.enumerateAttribute(.paragraphStyle, in: para) { value, range, _ in
                 let style = (value as? NSParagraphStyle)
                     .flatMap { $0.mutableCopy() as? NSMutableParagraphStyle }

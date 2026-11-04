@@ -5,6 +5,39 @@ import KnopoCore
 
 @MainActor
 @Suite struct RowMeasurementTests {
+    @Test func measurementTracksWrappingAndAppearance() throws {
+        let previous = (BlockRenderer.zoom, BlockRenderer.density, BlockRenderer.contentWeight)
+        defer {
+            BlockRenderer.zoom = previous.0
+            BlockRenderer.density = previous.1
+            BlockRenderer.contentWeight = previous.2
+        }
+        let styles: [(CGFloat, CGFloat, BlockRenderer.ContentWeight)] = [
+            (1, 1, .medium), (1.25, 1, .heavy), (1.25, 0.8, .heavy), (1, 1, .medium)
+        ]
+        let body = String(repeating: "A **bold** sentence with `code` and 👩🏽‍💻. ", count: 8)
+        let view = BlockEditorTextView.create()
+        for source in ["", body, "# " + body] {
+            for (zoom, density, weight) in styles {
+                BlockRenderer.zoom = zoom
+                BlockRenderer.density = density
+                BlockRenderer.contentWeight = weight
+                let expectedLineHeight = (NSLayoutManager().defaultLineHeight(
+                    for: BlockRenderer.pinnedFont(forSource: source)) * BlockRenderer.lineHeightScale).rounded()
+                #expect(BlockRenderer.lineHeight(forSource: source) == expectedLineHeight)
+                for width: CGFloat in [120, 560, 120] {
+                    view.frame = NSRect(x: 0, y: 0, width: width, height: 10)
+                    view.textContainer?.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+                    view.setContent(source.isEmpty ? " " : source)
+                    let layout = try #require(view.textLayoutManager)
+                    layout.ensureLayout(for: layout.documentRange)
+                    let displayed = ceil(layout.usageBoundsForTextContainer.height) + view.textContainerInset.height * 2
+                    #expect(BlockEditorTextView.measureHeight(for: source, width: width) == displayed)
+                }
+            }
+        }
+    }
+
     @Test func detachedPaneUsesAvailableWidthDuringSizing() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-initial-width-\(UUID().uuidString)")

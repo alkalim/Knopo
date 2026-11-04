@@ -62,6 +62,167 @@ import KnopoCore
         return Double(value.tv_sec) + Double(value.tv_nsec) / 1_000_000_000
     }
 
+    @Test func journalOpensAboveToolbarInsetWithoutTakingFocus() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-feed-origin-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        var page = store.page(named: JournalDate.today().pageName)
+        page.blocks = [Block(content: "A day opened for reading.")]
+        store.updatePage(page)
+        for offset in 1..<12 {
+            var previous = store.page(named: JournalDate.today().adding(days: -offset).pageName)
+            previous.blocks = [Block(content: "An earlier entry.")]
+            store.updatePage(previous)
+            try store.savePage(named: previous.name)
+        }
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let host = NSHostingView(rootView: MainWindow().environmentObject(app)
+            .environmentObject(Navigator(app: app)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 700),
+                              styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.title = "Knopo Journal Origin Test"
+        // Retain another main editor's focus so today's automatic reveal cannot
+        // hide an incorrect initial scroll position.
+        let focused = BlockEditorTextView.create()
+        host.addSubview(focused)
+        window.contentView = host
+        window.makeFirstResponder(focused)
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        for _ in 0..<20 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(window.firstResponder === focused)
+        let scroll = try #require(descendants(host, OutlineTableView.self).first?.enclosingScrollView)
+        #expect(scroll.contentInsets.top > 0)
+        #expect(abs(scroll.contentView.bounds.minY + scroll.contentInsets.top) < 1)
+        // A feed that initially fits is also at its bottom. Growing it must
+        // keep the reader at the top instead of following the new bottom.
+        page.blocks = (0..<40).map { Block(content: "An imported entry \($0).") }
+        store.updatePage(page)
+        app.dataVersion += 1
+        for _ in 0..<20 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(abs(scroll.contentView.bounds.minY + scroll.contentInsets.top) < 1)
+    }
+
+    @Test(arguments: [false, true], [0, 90, 365, 730])
+    func historyResizeKeepsWorkNearViewport(divider: Bool, depth: Int) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-deep-resize-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        let names = (0..<800).map { JournalDate.today().adding(days: -$0).pageName }
+        for (day, name) in names.enumerated() {
+            var page = store.page(named: name)
+            page.blocks = (0..<(4 + day % 9)).map {
+                Block(content: "Day \(day), note \($0). A short sentence about the project and another reminder for tomorrow.")
+            }
+            store.updatePage(page)
+            try store.savePage(named: name)
+        }
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+        let split = SplitWidth()
+        let content = divider ? AnyView(SplitContent(width: split)) : AnyView(JournalView())
+        let host = NSHostingView(rootView: content.environmentObject(app).environmentObject(nav))
+        let window = ResizeWindow(contentRect: NSRect(x: 0, y: 0, width: 1_400, height: 1_000),
+                                  styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.title = "Knopo Deep Resize Test"
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        func frame() async throws {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(2))
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+        }
+        for _ in 0..<20 { try await frame() }
+        let scroll = try #require(descendants(host, OutlineTableView.self).first?.enclosingScrollView)
+        let document = try #require(scroll.documentView)
+        window.makeFirstResponder(nil)
+        try await Task.sleep(for: .seconds(1))
+        var slowestScroll: Double = 0
+        for _ in 0..<2_000 {
+            if descendants(host, OutlineTableView.self).contains(where: {
+                ($0.delegate as? OutlineEditorController)?.pageName == names[depth]
+                    && $0.convert($0.bounds, to: document).intersects(scroll.documentVisibleRect)
+            }) { break }
+            let start = cpuTime()
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.minY + 700))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await frame()
+            slowestScroll = max(slowestScroll, cpuTime() - start)
+        }
+        let reading = try #require(descendants(host, OutlineTableView.self).first {
+            ($0.delegate as? OutlineEditorController)?.pageName == names[depth]
+        })
+        scroll.contentView.scroll(to: NSPoint(x: 0, y:
+            reading.convert(reading.rect(ofRow: 2), to: document).minY + 5 - scroll.contentInsets.top))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        for _ in 0..<20 { try await frame() }
+        let offset = reading.convert(reading.rect(ofRow: 2), to: document).minY - scroll.contentView.bounds.minY
+        // Retain identities so a deallocated table's address cannot hide a recreation.
+        func accessibilityChildren(_ element: Any) -> [Any] {
+            if let element = element as? NSAccessibilityProtocol { return element.accessibilityChildren() ?? [] }
+            return (element as? NSObject)?.accessibilityAttributeValue(.children) as? [Any] ?? []
+        }
+        func walkAccessibility(_ element: Any) -> Int {
+            let children = accessibilityChildren(element)
+            return children.count + children.reduce(0) { $0 + walkAccessibility($1) }
+        }
+        #expect(walkAccessibility(document) < 1_000)
+        #expect(descendants(host, OutlineTableView.self).count < 24)
+        var seen: [ObjectIdentifier: OutlineTableView] = [:]
+        var slowest: Double = 0
+        var drift: CGFloat = 0
+        let widths = Array(stride(from: 1_400, through: 320, by: -40))
+            + Array(stride(from: 360, through: 1_400, by: 40))
+        if divider { OutlineScrollAnchor.beginDividerResize(in: window) }
+        else { window.resizing = true }
+        for width in widths {
+            let start = cpuTime()
+            if divider { split.main = CGFloat(width) }
+            else { window.setContentSize(NSSize(width: width, height: 1_000)) }
+            try await frame()
+            slowest = max(slowest, cpuTime() - start)
+            #expect(reading.window === window, "The day being read must retain its editor")
+            let current = reading.convert(reading.rect(ofRow: 2), to: document).minY - scroll.contentView.bounds.minY
+            drift = max(drift, abs(current - offset))
+            for table in descendants(host, OutlineTableView.self) { seen[ObjectIdentifier(table)] = table }
+        }
+        if divider { OutlineScrollAnchor.endDividerResize(in: window) }
+        else {
+            window.resizing = false
+            for table in descendants(host, OutlineTableView.self) { table.onLiveResizeEnd?() }
+        }
+        for _ in 0..<20 { try await frame() }
+        #expect(drift < 1, "Reading position drift during resize: \(drift)")
+        #expect(abs(reading.convert(reading.rect(ofRow: 2), to: document).minY
+            - scroll.contentView.bounds.minY - offset) < 1)
+        #expect(seen.count < 24, "Resize constructed \(seen.count) day editors with only a few days visible")
+        #expect(slowestScroll < 0.200, "Slowest journal scroll frame used \(slowestScroll) seconds of main-thread CPU")
+        #expect(slowest < 0.200, "Slowest deep journal resize frame used \(slowest) seconds of main-thread CPU")
+        print("Journal resize at \(depth) days (divider: \(divider)): \(seen.count) editors, peak CPU \(slowest * 1000) ms, drift \(drift)")
+        // ⌘J must reveal the writing block even when today is offscreen.
+        nav.goToJournal()
+        for _ in 0..<40 { try await frame() }
+        let today = try #require(descendants(host, OutlineTableView.self).first {
+            ($0.delegate as? OutlineEditorController)?.pageName == names[0]
+        })
+        #expect(today.convert(today.bounds, to: document).intersects(scroll.documentVisibleRect))
+        let editor = try #require(window.firstResponder as? BlockEditorTextView)
+        #expect(editor.isDescendant(of: today))
+        #expect(!editor.visibleRect.isEmpty)
+        #expect(nav.focusWritingIn == nil)
+    }
+
     @Test func animatedWindowResizeFinishes() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-native-resize-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -105,6 +266,7 @@ import KnopoCore
             try await Task.sleep(for: .milliseconds(100))
         }
         let scroll = try #require(descendants(host, OutlineTableView.self).first?.enclosingScrollView)
+        #expect(scroll.contentInsets.top > 0, "The journal must extend under the native toolbar")
         let document = try #require(scroll.documentView)
         let target = JournalDate.today().adding(days: -90).pageName
         func settle() async throws {
@@ -525,20 +687,24 @@ import KnopoCore
         let beforeScroll = scroll.contentView.bounds.minY
         scroll.contentView.scroll(to: NSPoint(x: 0, y: beforeScroll - 1_000))
         scroll.reflectScrolledClipView(scroll.contentView)
-        let reading = outlines().compactMap { outline -> (OutlineTableView, Int)? in
+        let reading = outlines().compactMap { outline -> (OutlineTableView, Int, String)? in
             let top = scroll.contentView.bounds.minY + scroll.contentInsets.top
             let point = outline.convert(NSPoint(x: 0, y: top), from: document)
             guard point.y >= 0, point.y < outline.bounds.height else { return nil }
             let index = outline.row(at: NSPoint(x: 0, y: point.y))
-            return index >= 0 ? (outline, index) : nil
+            guard index >= 0, let controller = outline.delegate as? OutlineEditorController else { return nil }
+            return (outline, index, controller.pageName)
         }.first
-        if let (outline, index) = reading {
+        if let (outline, index, _) = reading {
             let top = outline.convert(outline.rect(ofRow: index), to: document).minY
             scroll.contentView.scroll(to: NSPoint(x: 0, y: top + 5 - scroll.contentInsets.top))
             scroll.reflectScrolledClipView(scroll.contentView)
         }
         for _ in 0..<20 { try await frame() }
-        if let (outline, index) = reading {
+        if let (_, index, readingPage) = reading {
+            let outline = try #require(outlines().first {
+                ($0.delegate as? OutlineEditorController)?.pageName == readingPage
+            })
             let top = outline.convert(outline.rect(ofRow: index), to: document).minY
             #expect(abs(top - scroll.contentView.bounds.minY - scroll.contentInsets.top + 5) < 1,
                     "Deferred row measurement must keep the text at the reading position")
