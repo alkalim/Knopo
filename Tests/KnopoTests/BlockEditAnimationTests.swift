@@ -164,6 +164,14 @@ import KnopoCore
             try await settle(window)
             #expect(animatedRows(table) == 0)
 
+            // The next row can be offscreen after the burst. Reveal the insertion
+            // area so the animation check does not depend on caret scroll margins.
+            let lastRow = table.numberOfRows - 1
+            table.scrollRowToVisible(lastRow)
+            try await waitUntil {
+                window.layoutIfNeeded()
+                return table.visibleRect.contains(table.rect(ofRow: lastRow))
+            }
             // A pause restores the slide; the burst does not disable it permanently.
             animationTime += 1
             try pressEnter(editor, window: window)
