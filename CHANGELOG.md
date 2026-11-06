@@ -1,6 +1,35 @@
 # Changelog
 
-Notable changes per release, newest first. Dates are release dates.
+Notable changes per release, newest first.
+
+## v0.9.0 (2026-11-06)
+
+Numbered lists, smoother editing and scrolling, and native macOS controls.
+
+**New**
+
+- Numbered lists: type `1. ` in an empty block, use `/numbered-list`, or choose **Numbered List** from the block menu. Nested lists, pasted numbered Markdown lists, and numbered lists from Logseq are supported.
+- Animations for block edits, expanding or collapsing blocks, sidebar cards and result groups.
+- An Animations setting follows macOS Reduce Motion by default, with On and Off overrides.
+- **Help > Knopo Help** (`⌘?`) opens the user guide.
+
+**Improved**
+
+- Sidebars open and close more smoothly while keeping editor focus.
+- Long journal feeds scroll and resize more smoothly. Resizing the window or sidebar keeps your reading position stable.
+- Back and forward buttons, find controls, and the All Pages filter use native macOS styling.
+- On macOS 26 and later, the toolbar uses the system background above the main view and right sidebar.
+- The graph name appears as the native window title. The settings gear beside it has been removed.
+- Tag cards in the right sidebar grow to fit their results and scroll with the sidebar.
+- Reference hover hints appear sooner and explain how to edit a result or open its source.
+
+**Fixes**
+
+- Pasting mixed Markdown preserves paragraphs before, between, and after lists, while keeping nested lists and fenced code blocks intact.
+- Completing a reference or tag no longer leaves an extra space before a closing parenthesis.
+- Table header backgrounds now cover the full padding.
+- On macOS 15, `⌘T` opens a tab instead of a separate window.
+- Toolbar buttons are no longer undersized on macOS 15.
 
 ## v0.8.1 (2026-10-12)
 

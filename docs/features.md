@@ -58,9 +58,9 @@ can extend the selection with `⇧↑` and `⇧↓`, then indent, move, copy, pa
 delete all selected blocks together. A selected parent carries its subtree with
 it.
 
-Blocks can be empty. An empty leaf hides its bullet when it is not focused, but
-remains available for editing — unless it is the page's only block, which keeps its
-bullet so an empty page still shows where to write.
+Blocks can be empty. An empty numbered block keeps its number. An empty ordinary
+leaf hides its bullet when it is not focused, but remains available for editing.
+The page's only block keeps its bullet so an empty page still shows where to write.
 
 **Today's journal opens ready to write.** Whether it is blank or already has
 today's notes in it, the caret starts in an empty block at the end, so you can
@@ -95,9 +95,8 @@ literal. Put a backslash before a Markdown trigger to escape it; for example,
 `\#not-a-tag` displays as `#not-a-tag` without creating a tag.
 
 Setext headings, footnotes, and HTML rendering are not supported. Their source is
-preserved, but unsupported syntax is displayed as plain text. A prefix such as
-`1.` is ordinary block text rather than an ordered-list marker. The outline's
-bullets and indentation define structure.
+preserved, but unsupported syntax is displayed as plain text. The outline's
+bullets or numbers and indentation define structure.
 
 Use `⇧Enter` for a newline inside one block. In a fenced code block, plain
 `Enter` also inserts a newline while the caret is inside the fence, and `Tab`
@@ -109,6 +108,29 @@ window scrolls just enough to keep the caret in sight.
 
 Right-click a bullet and choose **Background Color** to tint that block. The
 color applies to the block itself, not its children.
+
+### Numbered lists
+
+Type `1. ` in an empty block, use `/numbered-list`, or right-click its bullet
+and choose **Numbered List**. The same menu action toggles numbering on the
+top-level blocks in a selection. `Enter` continues a numbered list, and moving
+or indenting items updates their numbers automatically.
+
+Each consecutive run starts at 1. An ordinary sibling ends the run. Nested
+numbered items use decimal numbers, lowercase letters, then lowercase Roman
+numerals. Folding or zooming keeps the original numbers, as do embeds,
+Linked References, tag results, and query results.
+
+Press `Backspace` at the start of an item to remove its numbering. On an empty
+numbered item with no children, `Enter` outdents it when its parent is numbered
+and the move stays within the current zoom; otherwise it removes numbering in
+place.
+
+Pasting a Markdown numbered list creates numbered blocks. Knopo also recognizes
+Logseq's `logseq.order-list-type:: number` property. It stores new numbering as
+`knopo.list-type:: ordered` on ordinary Markdown bullet blocks, with the property
+hidden during editing. A `1.` prefix already stored in a block's body remains
+literal text.
 
 ### Tables
 

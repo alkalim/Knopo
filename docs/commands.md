@@ -23,6 +23,7 @@ close the menu without running a command.
 | `/yesterday` | Inserts a page reference to yesterday's journal. |
 | `/date` | Opens a calendar and inserts a reference to the chosen day. |
 | `/quote` | Adds `> ` to the start of the block. It does nothing if the prefix is already present. |
+| `/numbered-list` | Enables numbering on the current block. |
 | `/code-block` | Inserts a fenced code block and places the caret after the opening backticks, ready for an optional language name. |
 | `/link` | Opens a label-and-URL panel and inserts `[label](url)`. A URL on the clipboard is prefilled when possible. |
 | `/image` | Opens an image picker, copies the selected images into `assets/`, and inserts image Markdown. Multiple selection is allowed. |
@@ -74,7 +75,7 @@ These commands apply while the text caret is inside a block.
 | `⌘B` | Wrap the selection in `**` for bold, or insert an empty bold pair. |
 | `⌘I` | Wrap the selection in `*` for italics, or insert an empty italic pair. |
 | `Esc` | Leave text editing and select the block. |
-| `Backspace` at the start | Merge into the previous block. If the block is empty, delete it and focus the previous block. |
+| `Backspace` at the start | Remove numbering from a numbered block. Otherwise merge into the previous block; if empty, delete it and focus the previous block. |
 | `Delete` at the end | Pull the next leaf block's content into this block when it can be merged safely. |
 | `↑` on the first visual line | Focus the previous visible block. |
 | `↓` on the last visual line | Focus the next visible block. |
@@ -85,6 +86,11 @@ selection. Pasting Markdown list structure creates a corresponding block tree;
 plain multiline text creates one block per line. Multiline paste stays inside a
 quote, fenced-code, or table block, and pasting table-shaped text keeps it in
 one block.
+
+Type `1. ` in an empty ordinary block to start a numbered list. New siblings
+continue the numbering. `Enter` on an empty numbered item with no children
+outdents it if its parent is numbered and the move stays within the current zoom;
+otherwise it removes numbering. See [Numbered lists](features.md#numbered-lists).
 
 Typing any of these opening markers over selected text wraps it and keeps the
 inner text selected: `[`, backtick, `*`, `~`, `=`, or `$`. Press the marker a
@@ -155,13 +161,13 @@ Rebuilding the index lives in Graph Settings.
 
 | Action | Result |
 |---|---|
-| Click a bullet | Zoom into that block. |
+| Click a bullet or number | Zoom into that block. |
 | Click a disclosure triangle | Collapse or expand the block's children. |
-| Drag a bullet between rows | Move the block or current block selection before the row below the gap. |
-| Drag a bullet onto a row | Make the dragged block or selection that row's first child. |
-| Right-click a bullet | Copy a block reference, copy subtree Markdown, choose a background color, or delete. |
+| Drag a bullet or number between rows | Move the block or current block selection before the row below the gap. |
+| Drag a bullet or number onto a row | Make the dragged block or selection that row's first child. |
+| Right-click a bullet or number | Toggle Numbered List, copy a block reference, copy subtree Markdown, choose a background color, or delete. |
 | Click a page reference, block reference, embed row, query result, or tag result | Navigate to its source. |
-| Double-click a linked-reference block | Edit that backlink in place. Use its arrow button to navigate to the source block. |
+| Double-click a linked-reference block | Edit that backlink in place. Click its bullet or number to navigate to the source block. |
 | `⌘`-click or `⇧`-click navigable content | Open it in the right sidebar. |
 | Drag image files from Finder | Import the images and insert blocks at the drop location. |
 | Drag a rendered image's right-edge handle | Resize it while preserving its aspect ratio. |
