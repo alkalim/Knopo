@@ -815,7 +815,7 @@ public final class CacheDB: @unchecked Sendable {
         """
 
     /// Journal day keys that have something in them, newest first — what the
-    /// journal home lists below today (SPEC §10). A day whose text you delete
+    /// journal home lists alongside today (SPEC §10). A day whose text you delete
     /// leaves a file holding one blank block; counting blocks rather than content
     /// kept such a day in the feed for good, showing the empty-page hint on it.
     public func journalDaysWithContent() throws -> [String] {

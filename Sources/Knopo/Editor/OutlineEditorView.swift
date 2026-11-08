@@ -1192,17 +1192,30 @@ final class OutlineEditorController: NSObject {
         target.origin.y -= topOverlap + margin
         target.size.height += topOverlap + margin * 2
         if request.showsRunUp {
-            // Grown upwards to a windowful, so the row lands at the foot of the
-            // view and a day that fits stops against the top of the feed. The
-            // window's height, not this table's, which is shorter than it.
+            // Show the entry above the caret, stopping at this day's heading.
             let windowful = tableView.enclosingScrollView?.documentVisibleRect.height
                 ?? tableView.visibleRect.height
             let runUp = max(0, windowful - target.height)
             target.origin.y -= runUp
             target.size.height += runUp
+            if inJournalFeed, let feed = scroll.documentView as? JournalTableView {
+                let dayRow = feed.row(for: tableView)
+                if dayRow >= 0 {
+                    let dayTop = tableView.convert(feed.rect(ofRow: dayRow), from: feed).minY
+                    target.origin.y = max(target.minY, dayTop - topOverlap - 20)
+                }
+            }
         }
         OutlineScrollAnchor.cancel(in: tableView)
-        tableView.scrollToVisible(target)
+        if request.showsRunUp, inJournalFeed, let document = scroll.documentView {
+            // The target already includes the toolbar inset. Set the origin
+            // directly so AppKit does not apply that inset a second time.
+            let origin = document.convert(target, from: tableView).minY
+            scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: origin))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        } else {
+            tableView.scrollToVisible(target)
+        }
         tableView.layoutSubtreeIfNeeded()
         revealRequest?.rowMinY = tableView.rect(ofRow: row).minY
         guard request.flashes else { return }

@@ -586,8 +586,8 @@ final class AppState: ObservableObject {
         (try? store.cache.allTags()) ?? []
     }
 
-    /// Journal home days: today first, then existing non-empty days, newest
-    /// first (SPEC §10). Memoized — the (relatively expensive) `journalPages()`
+    /// Journal home days: today and existing non-empty days, newest first
+    /// (SPEC §10). Memoized — the (relatively expensive) `journalPages()`
     /// scan runs only when the day *set* changes (a day added, deleted, or
     /// crossing empty↔non-empty), detected via a cheap signature, rather than on
     /// every keystroke. Also rebuilds when the calendar day rolls over.
@@ -601,7 +601,7 @@ final class AppState: ObservableObject {
             for key in existing where key != today {
                 names.append(key)
             }
-            journalDayCache = names
+            journalDayCache = names.sorted(by: >)
         }
         return journalDayCache
     }

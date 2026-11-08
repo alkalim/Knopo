@@ -178,6 +178,35 @@ import KnopoCore
         #expect(app.document(for: "Notes").blocks[0].content == "alpha")
     }
 
+    @MainActor
+    @Test func journalDaysKeepFutureEntriesInDateOrderAcrossRollover() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-future-journals-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        for day in ["2026-11-07", "2026-11-09", "2026-11-12"] {
+            var doc = try store.createPage(named: day)
+            doc.blocks[0].content = "Entry for \(day)"
+            store.updatePage(doc)
+            try store.savePage(named: day)
+        }
+        let empty = try store.createPage(named: "2026-11-10")
+        try store.savePage(named: empty.name)
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+
+        #expect(app.journalDays(today: "2026-11-07") == ["2026-11-12", "2026-11-09", "2026-11-07"])
+        #expect(app.journalDays(today: "2026-11-08") == ["2026-11-12", "2026-11-09", "2026-11-08", "2026-11-07"])
+        #expect(app.journalDays(today: "2026-11-09") == ["2026-11-12", "2026-11-09", "2026-11-07"])
+        #expect(app.journalDays(today: "2026-11-10") == ["2026-11-12", "2026-11-10", "2026-11-09", "2026-11-07"])
+
+        var future = store.page(named: "2026-11-12")
+        future.blocks = []
+        store.updatePage(future)
+        try store.savePage(named: future.name)
+        #expect(app.journalDays(today: "2026-11-08") == ["2026-11-09", "2026-11-08", "2026-11-07"])
+    }
+
     /// An app left open over midnight must roll the journal feed over by itself:
     /// nothing on disk changes at the boundary, so without the day watch the feed
     /// keeps offering the finished day as today. Afterwards the new day heads the

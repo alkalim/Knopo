@@ -336,8 +336,9 @@ page's link identity and filename remain unchanged.
 
 ## Journal
 
-Knopo's home view is a journal with one page per calendar day. Today is always
-shown, followed by previous non-empty days in reverse chronological order. A
+Knopo's home view is a journal with one page per calendar day. It opens at today,
+with non-empty future days above and previous days below in reverse chronological
+order. Today is always shown, even when empty. A
 journal is an ordinary page in every other respect: it can contain blocks, be
 referenced, be favourited, and show backlinks.
 

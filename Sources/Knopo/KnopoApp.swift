@@ -109,7 +109,7 @@ final class GraphManager: ObservableObject {
         welcome.blocks = PageParser.parse("""
         - **Knopo** is a local-first outliner: everything is a block, pages are trees of blocks.
         - Your notes live as plain Markdown files in `pages/` and `journals/` — nothing is held hostage.
-        - The journal is your home: one page per day, today on top. `⌘J` gets you there from anywhere.
+        - The journal is your home: one page per day, opening at today. `⌘J` gets you back to today from anywhere.
         - Try the basics: #getting-started
           - Make a page: press `⌘K`, type its name, and choose “Create page …” — or use New Page in All Pages.
           - Type `[[` to link to a page — like [[Ideas]] (links to pages that don't exist yet create *stubs*, which become real pages as soon as you write in them).

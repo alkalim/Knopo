@@ -9,7 +9,7 @@ enum NavTarget: Hashable {
     case page(name: String, zoom: UUID? = nil)
     /// The generated, read-only tag view (SPEC §8.2).
     case tag(String)
-    /// Journal home: today + previous days, infinite scroll (SPEC §10).
+    /// Journal home: days in descending date order, infinite scroll (SPEC §10).
     case journalHome
     case allPages
 

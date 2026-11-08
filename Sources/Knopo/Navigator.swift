@@ -109,7 +109,7 @@ final class Navigator: ObservableObject {
     }
 
     /// `⌘J`: take me to today, every time. From anywhere else this opens the
-    /// journal home (today plus previous days); with the feed already showing it
+    /// journal home (days in descending date order); with the feed already showing it
     /// stays put, so repeated presses never cycle between two views. Either way it
     /// asks for the caret in today's writing block (§5.4, §10) — explicitly, so
     /// unlike the automatic "a journal day opens ready to write" it fires however

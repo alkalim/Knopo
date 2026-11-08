@@ -1,8 +1,8 @@
 import SwiftUI
 import KnopoCore
 
-/// Journal home: today first (even when empty), then previous non-empty days,
-/// scrolling backwards (SPEC §10).
+/// Journal home: non-empty days in date order, with today even when empty.
+/// Opens at today, with future days above it (SPEC §10).
 struct JournalView: View {
     @EnvironmentObject var app: AppState
 

@@ -61,6 +61,47 @@ import KnopoCore
         override var inLiveResize: Bool { resizing || super.inLiveResize }
     }
 
+    @Test(arguments: [false, true])
+    func rolloverRetainsTheNewTodayAmongFutureEntries(alreadyExists: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-future-rollover-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        let today = JournalDate.today().pageName
+        let tomorrow = JournalDate.today().adding(days: 1).pageName
+        let later = JournalDate.today().adding(days: 2).pageName
+        for day in [today, later] + (alreadyExists ? [tomorrow] : []) {
+            var page = store.page(named: day)
+            page.blocks = [Block(content: "Entry for \(day)")]
+            store.updatePage(page)
+            try store.savePage(named: day)
+        }
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 650),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: JournalView().environmentObject(app).environmentObject(nav))
+        window.contentView = host
+        defer { window.contentView = nil }
+        for _ in 0..<20 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let table = try #require(tables(in: host).first?.enclosingScrollView?.documentView as? JournalTableView)
+        let coordinator = try #require(table.delegate as? JournalScrollView.Coordinator)
+        let oldTodayHost = try #require(coordinator.todayHost)
+        let tomorrowHost = alreadyExists ? table.view(atColumn: 0, row: 2, makeIfNecessary: false) : nil
+        coordinator.update(days: [later, tomorrow, today], focusToken: nav.focusWritingToken, today: tomorrow)
+        window.layoutIfNeeded()
+        let newTodayHost = try #require(coordinator.todayHost)
+        if alreadyExists { #expect(newTodayHost === tomorrowHost) }
+        #expect(newTodayHost !== oldTodayHost)
+        #expect(newTodayHost.identifier == nil)
+        #expect(table.view(atColumn: 0, row: 2, makeIfNecessary: false) === newTodayHost)
+        #expect(oldTodayHost.identifier == NSUserInterfaceItemIdentifier("day"))
+        #expect(table.view(atColumn: 0, row: 3, makeIfNecessary: false) === oldTodayHost)
+    }
+
     @Test func shortFeedDoesNotScrollByTheToolbarInset() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-short-feed-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -304,14 +345,15 @@ import KnopoCore
         try await settle()
     }
 
-    @Test func fastUpwardScrollingReturnsToNewerDays() async throws {
+    @Test(arguments: [0, 8])
+    func fastUpwardScrollingReturnsToNewerDays(futureDays: Int) async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-journal-scroll-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try GraphStore(root: root)
         let today = JournalDate.today()
         for offset in 0..<730 {
-            var doc = store.page(named: today.adding(days: -offset).pageName)
+            var doc = store.page(named: today.adding(days: futureDays - offset).pageName)
             doc.blocks = (0..<(4 + offset % 13)).map { index in
                 Block(content: "Entry \(offset), block \(index). "
                     + String(repeating: "Daily notes with variable line wrapping. ",
@@ -388,7 +430,16 @@ import KnopoCore
 
         // Let today's automatic caret reveal expire before moving the feed.
         try await settle(50)
+        let editor = try #require(window.firstResponder as? BlockEditorTextView)
+        #expect(editor.window === window)
+        #expect(editor.convert(editor.bounds, to: document).intersects(scroll.documentVisibleRect))
         window.makeFirstResponder(nil)
+        if futureDays > 0 {
+            // These future entries have not been measured at this width yet.
+            for _ in 0..<12 { try await scrollBy(-150) }
+            #expect(try newestVisibleDay() > today.pageName)
+            #expect(checkedAnchors > 0)
+        }
         for width: CGFloat in [700, 480] {
             window.setContentSize(NSSize(width: width, height: 450))
             try await settle()
@@ -401,7 +452,7 @@ import KnopoCore
             for _ in 0..<80 { try await scrollBy(100) }
             try await settle()
             var previous = try newestVisibleDay()
-            #expect(previous < today.adding(days: -5).pageName)
+            #expect(previous < today.adding(days: futureDays - 5).pageName)
 
             // Previously visited days have heights from the other width.
             window.setContentSize(NSSize(width: width == 700 ? 480 : 700, height: 450))
@@ -419,7 +470,7 @@ import KnopoCore
                 #expect(tables(in: host).count < 32, "The journal must keep loading days lazily")
                 if scroll.documentVisibleRect.minY < 1 { break }
             }
-            #expect(previous == today.pageName)
+            #expect(previous == today.adding(days: futureDays).pageName)
             #expect(scroll.documentVisibleRect.minY < 1)
         }
 

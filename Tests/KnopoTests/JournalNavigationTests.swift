@@ -28,14 +28,16 @@ import KnopoCore
         }
     }
 
-    private func rig(todayBlocks: Int, wholeWindow: Bool = false) throws -> Rig {
+    private func rig(todayBlocks: Int, wholeWindow: Bool = false, futureDays: Int = 0) throws -> Rig {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("knopo-journal-nav-\(UUID().uuidString)")
         let store = try GraphStore(root: root)
         let today = JournalDate.today()
-        for offset in 0..<15 {
+        for offset in -futureDays..<15 {
             var doc = store.page(named: today.adding(days: -offset).pageName)
-            doc.blocks = (0..<(offset == 0 ? todayBlocks : 8))
+            // Short reminders and a long agenda exercise estimates above today.
+            let blockCount = offset == 0 ? todayBlocks : (offset == -1 ? 80 : (offset < 0 ? 1 : 8))
+            doc.blocks = (0..<blockCount)
                 .map { Block(content: "Entry \(offset), block \($0)") }
             store.updatePage(doc)
             try store.savePage(named: doc.name)
@@ -67,6 +69,62 @@ import KnopoCore
             view = current.superview
         }
         return nil
+    }
+
+    @Test(arguments: [0, 6, 40])
+    func futureEntriesKeepTodayReadyToWriteAndReachable(todayBlocks: Int) async throws {
+        let rig = try rig(todayBlocks: todayBlocks, futureDays: 30)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        rig.scroll.automaticallyAdjustsContentInsets = false
+        rig.scroll.contentInsets = NSEdgeInsets(top: 52, left: 0, bottom: 0, right: 0)
+        try await rig.settle()
+        try await Task.sleep(for: .milliseconds(600))
+        try await rig.settle()
+        let today = JournalDate.today().pageName
+        let initialEditor = try #require(rig.window.firstResponder as? BlockEditorTextView)
+        #expect(outlinePage(of: initialEditor) == today)
+        #expect(initialEditor.window === rig.window)
+        #expect(!initialEditor.visibleRect.isEmpty)
+        let feed = try #require(rig.scroll.documentView as? JournalTableView)
+        let coordinator = try #require(feed.delegate as? JournalScrollView.Coordinator)
+        #expect(coordinator.days.first == JournalDate.today().adding(days: 30).pageName)
+        let todayHost = try #require(coordinator.todayHost)
+        func expectTodayHeadingNearTop() {
+            guard todayBlocks < 10 else { return }
+            let headingY = todayHost.convert(todayHost.bounds, to: feed).minY
+            let visibleTop = rig.scroll.contentView.bounds.minY + rig.scroll.contentInsets.top
+            #expect(abs(headingY - visibleTop - 20) < 1)
+        }
+        expectTodayHeadingNearTop()
+
+        // A new future entry changes today's row without replacing its editor.
+        var future = rig.app.store.page(named: JournalDate.today().adding(days: 31).pageName)
+        future.blocks = [Block(content: "A later plan")]
+        rig.app.store.updatePage(future)
+        try rig.app.store.savePage(named: future.name)
+        rig.app.dataVersion += 1
+        try await rig.settle()
+        #expect(coordinator.todayHost === todayHost)
+        #expect(rig.window.firstResponder === initialEditor)
+
+        for destination in [0, coordinator.days.count - 1] {
+            rig.window.makeFirstResponder(nil)
+            try await Task.sleep(for: .milliseconds(600))
+            feed.scrollRowToVisible(destination + 1)
+            try await rig.settle()
+            #expect(initialEditor.window == nil || initialEditor.visibleRect.isEmpty)
+            rig.nav.goToJournal()
+            try await rig.settle()
+            try await Task.sleep(for: .milliseconds(600))
+            try await rig.settle()
+            let editor = try #require(rig.window.firstResponder as? BlockEditorTextView)
+            #expect(outlinePage(of: editor) == today)
+            #expect(editor.window === rig.window)
+            #expect(!editor.visibleRect.isEmpty)
+            #expect(rig.nav.focusWritingIn == nil)
+            #expect(coordinator.todayHost === todayHost)
+            expectTodayHeadingNearTop()
+        }
     }
 
     @Test func leavingTheJournalCommitsTheCurrentUndoSession() async throws {

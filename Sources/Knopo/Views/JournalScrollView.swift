@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import KnopoCore
 
 /// AppKit owns scrolling, row reuse, and document layout.
 struct JournalScrollView: NSViewRepresentable {
@@ -37,6 +38,7 @@ struct JournalScrollView: NSViewRepresentable {
         var heights: [String: CGFloat] = [:]
         // Returning to today must not repeat its initial automatic writing focus.
         var todayHost: JournalDayHost?
+        private(set) var today = JournalDate.today().pageName
 
         init(app: AppState, nav: Navigator) {
             self.app = app
@@ -60,7 +62,20 @@ struct JournalScrollView: NSViewRepresentable {
             table.dataSource = self
         }
 
-        func update(days newDays: [String], focusToken newToken: Int) {
+        func update(days newDays: [String], focusToken newToken: Int,
+                    today newToday: String = JournalDate.today().pageName) {
+            let initial = days.isEmpty
+            if today != newToday {
+                todayHost?.identifier = .init("day")
+                todayHost = nil
+                today = newToday
+                // A future entry may already be on screen when midnight arrives.
+                if let index = days.firstIndex(of: today),
+                   let host = table.view(atColumn: 0, row: index + 1, makeIfNecessary: false) as? JournalDayHost {
+                    host.identifier = nil
+                    todayHost = host
+                }
+            }
             if days != newDays {
                 let oldDays = days
                 let oldSet = Set(oldDays)
@@ -68,7 +83,7 @@ struct JournalScrollView: NSViewRepresentable {
                 if !oldDays.isEmpty {
                     OutlineScrollAnchor.preserve(beforeResizing: table, widthChanged: true)
                 }
-                if oldDays.first != newDays.first {
+                if !newSet.contains(today) {
                     todayHost?.identifier = .init("day")
                     todayHost = nil
                 }
@@ -79,12 +94,28 @@ struct JournalScrollView: NSViewRepresentable {
                 table.insertRows(at: IndexSet(newDays.indices.filter { !oldSet.contains(newDays[$0]) }.map { $0 + 1 }), withAnimation: [])
                 table.endUpdates()
             }
-            if focusToken != newToken, !days.isEmpty {
+            if initial, let index = days.firstIndex(of: today), index > 0 {
+                // Make today's editor available for its initial writing focus.
+                table.initialScroll = { [weak self] in
+                    self?.showToday()
+                }
+                table.needsLayout = true
+            }
+            if focusToken != newToken, let index = days.firstIndex(of: today) {
                 focusToken = newToken
-                if table.view(atColumn: 0, row: 1, makeIfNecessary: false) == nil {
-                    table.scrollRowToVisible(1)
+                if table.view(atColumn: 0, row: index + 1, makeIfNecessary: false) == nil {
+                    showToday()
                 }
             }
+        }
+
+        private func showToday() {
+            guard let index = days.firstIndex(of: today), let scroll = table.enclosingScrollView else { return }
+            var viewport = scroll.contentView.bounds
+            viewport.origin.y = table.rect(ofRow: index + 1).minY - 20 - scroll.contentInsets.top
+            let constrained = scroll.contentView.constrainBoundsRect(viewport)
+            scroll.contentView.scroll(to: constrained.origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int { days.count + 2 }
@@ -99,14 +130,15 @@ struct JournalScrollView: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard days.indices.contains(row - 1) else { return nil }
-            if row == 1, let todayHost { return todayHost }
-            let identifier = NSUserInterfaceItemIdentifier("day")
             let day = days[row - 1]
+            let isToday = day == today
+            if isToday, let todayHost { return todayHost }
+            let identifier = NSUserInterfaceItemIdentifier("day")
             let content = AnyView(JournalDay(day: day, outlineWidth: max(100, tableView.bounds.width - 40))
                 .padding(.horizontal, 20)
                 .environmentObject(app).environmentObject(nav))
             let host: JournalDayHost
-            if row != 1, let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? JournalDayHost {
+            if !isToday, let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? JournalDayHost {
                 host = reused
                 host.heightChanged = nil
                 host.rootView = content
@@ -116,7 +148,7 @@ struct JournalScrollView: NSViewRepresentable {
                 host.safeAreaRegions = []
             }
             // Today is retained separately and must not also enter the reuse pool.
-            host.identifier = row == 1 ? nil : identifier
+            host.identifier = isToday ? nil : identifier
             if host.measuredHeight == nil {
                 host.measuredHeight = host.heightAnchor.constraint(equalToConstant: heights[day] ?? 320)
                 host.measuredHeight?.isActive = true
@@ -124,7 +156,7 @@ struct JournalScrollView: NSViewRepresentable {
                 host.measuredHeight?.constant = heights[day] ?? 320
             }
             host.invalidateIntrinsicContentSize()
-            if row == 1 { todayHost = host }
+            if isToday { todayHost = host }
             host.restoreEditing = { [weak self] page, state in self?.restoreEditing(state, on: page) }
             host.heightChanged = { [weak self, weak host] height in
                 guard let self, let host else { return }
@@ -195,6 +227,16 @@ final class JournalDayHost: NSHostingView<AnyView> {
 }
 
 final class JournalTableView: NSTableView {
+    var initialScroll: (() -> Void)?
+
+    override func layout() {
+        if window != nil, bounds.width > 0, let initialScroll {
+            self.initialScroll = nil
+            initialScroll()
+        }
+        super.layout()
+    }
+
     override func accessibilityChildren() -> [Any]? {
         // Keep accessibility discovery from constructing every day's editor.
         let accessibility = self as NSAccessibilityProtocol
