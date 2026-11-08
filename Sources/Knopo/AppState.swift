@@ -626,10 +626,14 @@ final class AppState: ObservableObject {
         }
     }
 
+    func pageExists(named name: String) -> Bool {
+        (try? store.cache.hasPage(named: name)) ?? false
+    }
+
     /// Fuzzy page-name match for `[[` autocomplete and Cmd+K, ordered by
     /// recency of access (SPEC §6.1).
     func pageNames(matching query: String) -> [String] {
-        let listings = allPages()
+        let listings = allPages() + (query.isEmpty ? [] : ((try? store.cache.aliasListings()) ?? []))
         let recentKeys = (try? store.cache.recentPageKeys()) ?? []
         let recencyRank: [String: Int] = Dictionary(
             uniqueKeysWithValues: recentKeys.enumerated().map { ($1, $0) }
@@ -649,7 +653,12 @@ final class AppState: ObservableObject {
         // (e.g. `[[Mar 1st, 2026]]` stubs from an unconverted Logseq import).
         // Then recency, then alphabetically.
         func demoted(_ l: PageListing) -> Bool { l.isJournal || !l.fileExists }
-        return listings.compactMap { l in matchTier(query: query, in: l.displayName).map { (l, $0) } }
+        let dateKey = JournalDate(pageName: query)?.pageName
+        return listings.compactMap { l in
+            let sameDate = dateKey != nil && l.nameKey == dateKey && PageName.key(l.displayName) == dateKey
+            let tier = sameDate ? 0 : matchTier(query: query, in: l.displayName)
+            return tier.map { (l, $0) }
+        }
             .sorted { a, b in
                 if a.1 != b.1 { return a.1 < b.1 }
                 if demoted(a.0) != demoted(b.0) { return !demoted(a.0) }

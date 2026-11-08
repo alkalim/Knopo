@@ -333,7 +333,50 @@ public final class CacheDB: @unchecked Sendable {
                 CREATE INDEX IF NOT EXISTS props_block ON props(block_id);
                 """)
         }
+        migrator.registerMigration("v8-page-aliases") { db in
+            try db.execute(sql: """
+                CREATE TABLE page_aliases (
+                    page_key TEXT NOT NULL,
+                    alias_name_lc TEXT NOT NULL,
+                    alias_name TEXT NOT NULL,
+                    PRIMARY KEY (page_key, alias_name_lc)
+                );
+                CREATE INDEX page_aliases_key ON page_aliases(alias_name_lc);
+                CREATE VIEW effective_page_aliases AS
+                    SELECT a.* FROM page_aliases a
+                    JOIN pages p ON p.name_key = a.page_key
+                    WHERE NOT EXISTS (SELECT 1 FROM pages WHERE name_key = a.alias_name_lc)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM page_aliases other
+                        JOIN pages owner ON owner.name_key = other.page_key
+                        WHERE other.alias_name_lc = a.alias_name_lc AND other.page_key <> a.page_key
+                      );
+                """)
+            // Existing property rows contain everything needed to add aliases.
+            // Keep block IDs and file stamps intact during the upgrade.
+            for alias in try Self.storedAliases(db) {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO page_aliases (page_key, alias_name_lc, alias_name)
+                    VALUES (?, ?, ?)
+                    """, arguments: [alias.pageKey, PageName.key(alias.name), alias.name])
+            }
+        }
         try migrator.migrate(dbQueue)
+    }
+
+    private static func storedAliases(_ db: Database) throws -> [(pageKey: String, name: String)] {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT page_key, key, value FROM page_props WHERE LOWER(key) = 'alias'
+            UNION ALL
+            SELECT p.page_key, p.key, p.value FROM props p
+            JOIN blocks b ON b.id = p.block_id
+            WHERE b.position = 0 AND LOWER(p.key) = 'alias'
+            """)
+        return rows.flatMap { row in
+            let key: String = row["page_key"]
+            let property = BlockProperty(key: row["key"], value: row["value"])
+            return PageDocument.aliases(in: [property], pageName: key).map { (key, $0) }
+        }
     }
 
     // MARK: - Page indexing
@@ -530,7 +573,20 @@ public final class CacheDB: @unchecked Sendable {
             try Self.insertPageProps(db, page: page, key: key)
             updated.preambleDigest = preambleDigest
         }
+        if skeleton.preambleDigest != preambleDigest
+            || skeleton.entries.first?.digest != plan.first?.digest {
+            try Self.replaceAliases(db, page: page)
+        }
         return updated
+    }
+
+    private static func replaceAliases(_ db: Database, page: PageDocument) throws {
+        try db.execute(sql: "DELETE FROM page_aliases WHERE page_key = ?", arguments: [page.nameKey])
+        for alias in page.aliases {
+            try db.execute(sql: """
+                INSERT INTO page_aliases (page_key, alias_name_lc, alias_name) VALUES (?, ?, ?)
+                """, arguments: [page.nameKey, PageName.key(alias), alias])
+        }
     }
 
     /// The prepared statements a block's facet rows need. `db.execute(sql:)`
@@ -608,6 +664,7 @@ public final class CacheDB: @unchecked Sendable {
     ) throws -> PageSkeleton? {
         let key = page.nameKey
         try Self.deletePageRows(db, key: key)
+        try Self.replaceAliases(db, page: page)
         let journalDate = JournalDate(pageName: page.name)
         try db.execute(
             sql: """
@@ -720,6 +777,7 @@ public final class CacheDB: @unchecked Sendable {
         try db.execute(sql: "DELETE FROM tags WHERE page_key = ?", arguments: [key])
         try db.execute(sql: "DELETE FROM props WHERE page_key = ?", arguments: [key])
         try db.execute(sql: "DELETE FROM page_props WHERE page_key = ?", arguments: [key])
+        try db.execute(sql: "DELETE FROM page_aliases WHERE page_key = ?", arguments: [key])
     }
 
     public func fileStamp(forPageKey key: String) throws -> FileStamp? {
@@ -754,7 +812,7 @@ public final class CacheDB: @unchecked Sendable {
 
     public func clearAll() throws {
         try dbQueue.write { db in
-            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {
+            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props", "page_aliases"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
@@ -771,13 +829,61 @@ public final class CacheDB: @unchecked Sendable {
     /// A forced rebuild must also remove rows whose owning page is missing.
     func removeOrphanedRows() throws {
         try dbQueue.write { db in
-            for table in ["blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {
+            for table in ["blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props", "page_aliases"] {
                 try db.execute(sql: "DELETE FROM \(table) WHERE page_key NOT IN (SELECT name_key FROM pages)")
             }
         }
     }
 
     // MARK: - Pages
+
+    /// Resolves one unambiguous alias. Real page names always take precedence.
+    public func canonicalPageKey(for name: String) throws -> String {
+        try dbQueue.read { try Self.canonicalPageKey($0, key: PageName.key(name)) }
+    }
+
+    /// Resolves a name without fetching block counts or other listing metadata.
+    func pageIdentity(named name: String) throws -> (key: String, name: String)? {
+        let key = PageName.key(name)
+        return try dbQueue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT name_key, display_name FROM pages WHERE name_key = COALESCE(
+                    (SELECT page_key FROM effective_page_aliases WHERE alias_name_lc = ?), ?)
+                """, arguments: [key, key]) else { return nil }
+            return (row["name_key"], row["display_name"])
+        }
+    }
+
+    /// Includes referenced stubs and aliases, regardless of their display spelling.
+    public func hasPage(named name: String) throws -> Bool {
+        let key = PageName.key(name)
+        return try dbQueue.read { db in
+            try Bool.fetchOne(db, sql: """
+                SELECT EXISTS (
+                    SELECT 1 FROM pages WHERE name_key = ?
+                    UNION ALL SELECT 1 FROM effective_page_aliases WHERE alias_name_lc = ?
+                    UNION ALL SELECT 1 FROM page_refs WHERE target_key = ?
+                )
+                """, arguments: [key, key, key]) ?? false
+        }
+    }
+
+    private static func canonicalPageKey(_ db: Database, key: String) throws -> String {
+        try String.fetchOne(db, sql: "SELECT page_key FROM effective_page_aliases WHERE alias_name_lc = ?",
+                            arguments: [key]) ?? key
+    }
+
+    /// Alias names for autocomplete, carrying their target's identity and recency.
+    public func aliasListings() throws -> [PageListing] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT p.name_key, a.alias_name AS display_name, p.is_journal, p.journal_date,
+                       p.file_exists, 0 AS block_count
+                FROM effective_page_aliases a JOIN pages p ON p.name_key = a.page_key
+                ORDER BY a.alias_name COLLATE NOCASE
+                """).map(Self.listing(from:))
+        }
+    }
 
     public func allPages() throws -> [PageListing] {
         try dbQueue.read { db in
@@ -868,6 +974,7 @@ public final class CacheDB: @unchecked Sendable {
             try String.fetchAll(db, sql: """
                 SELECT target_display, MIN(rowid) FROM page_refs
                 WHERE target_key NOT IN (SELECT name_key FROM pages)
+                  AND target_key NOT IN (SELECT alias_name_lc FROM effective_page_aliases)
                 GROUP BY target_key
                 ORDER BY target_key
                 """)
@@ -892,6 +999,7 @@ public final class CacheDB: @unchecked Sendable {
     /// Self-references are excluded. O(incoming refs).
     public func backlinks(of pageKey: String) throws -> [BacklinkHit] {
         try dbQueue.read { db in
+            let pageKey = try Self.canonicalPageKey(db, key: PageName.key(pageKey))
             let direct = try Row.fetchAll(
                 db,
                 sql: """
@@ -899,9 +1007,12 @@ public final class CacheDB: @unchecked Sendable {
                     FROM page_refs r
                     JOIN blocks b ON b.id = r.block_id
                     JOIN pages p ON p.name_key = b.page_key
-                    WHERE r.target_key = ? AND r.page_key <> ?
+                    WHERE r.target_key IN (
+                        SELECT ? UNION ALL
+                        SELECT alias_name_lc FROM effective_page_aliases WHERE page_key = ?
+                    ) AND r.page_key <> ?
                     """,
-                arguments: [pageKey, pageKey]
+                arguments: [pageKey, pageKey, pageKey]
             )
             let viaBlockRefs = try Row.fetchAll(
                 db,
@@ -1185,8 +1296,14 @@ public final class CacheDB: @unchecked Sendable {
             return ("EXISTS (SELECT 1 FROM tags x WHERE x.block_id = b.id AND x.tag = ?)",
                     [tag.lowercased()])
         case .pageRef(let name):
-            return ("EXISTS (SELECT 1 FROM page_refs x WHERE x.block_id = b.id AND x.target_key = ?)",
-                    [PageName.key(name)])
+            let canonical = "COALESCE((SELECT page_key FROM effective_page_aliases WHERE alias_name_lc = ?), ?)"
+            let key = PageName.key(name)
+            return ("""
+                EXISTS (SELECT 1 FROM page_refs x WHERE x.block_id = b.id AND x.target_key IN (
+                    SELECT \(canonical) UNION ALL
+                    SELECT alias_name_lc FROM effective_page_aliases WHERE page_key = \(canonical)
+                ))
+                """, [key, key, key, key])
         case .task(let states):
             guard !states.isEmpty else { return ("0", []) }
             let marks = databaseQuestionMarks(count: states.count)

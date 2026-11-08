@@ -78,10 +78,9 @@ struct SearchPalette: View {
         guard !query.isEmpty else {
             return app.pageNames(matching: "").prefix(12).map { .page($0) }
         }
-        var results: [Result] = app.pageNames(matching: query).prefix(8).map { .page($0) }
-        let exactExists = app.allPages().contains {
-            PageName.key($0.displayName) == PageName.key(query)
-        }
+        let names = app.pageNames(matching: query)
+        var results: [Result] = names.prefix(8).map { .page($0) }
+        let exactExists = app.pageExists(named: query)
         if !exactExists, PageName.isValid(query) {
             results.append(.createPage(query))
         }
@@ -129,7 +128,7 @@ struct SearchPalette: View {
             target = .page(name: name)
         case .createPage(let name):
             _ = try? app.store.createPage(named: name)
-            nav.focusFirstBlock = name // focus the empty first block on load
+            nav.focusFirstBlock = app.store.canonicalPageName(for: name)
             target = .page(name: name)
         case .block(let hit):
             nav.navigateToBlock(pageName: hit.pageDisplayName, blockID: hit.blockID,

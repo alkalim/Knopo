@@ -49,6 +49,44 @@ public struct PageDocument: Identifiable, Sendable {
         preamble.components(separatedBy: "\n").compactMap(PageParser.matchProperty)
     }
 
+    /// Alternative page names from the preamble and first block.
+    public var aliases: [String] {
+        Self.aliases(in: preambleProperties + pageProperties, pageName: name)
+    }
+
+    static func aliases(in properties: [BlockProperty], pageName: String) -> [String] {
+        var seen: Set<String> = [PageName.key(pageName)]
+        return properties.filter { $0.key.lowercased() == "alias" }.flatMap { property in
+            // Bracketed names can contain commas, such as [[Doe, Jane]].
+            var parts: [String] = []
+            var remaining = property.value[...]
+            while !remaining.isEmpty {
+                remaining = remaining.drop(while: { $0.isWhitespace || $0 == "," })
+                guard !remaining.isEmpty else { break }
+                if remaining.hasPrefix("[["), let end = remaining.range(of: "]]") {
+                    parts.append(String(remaining.dropFirst(2)[..<end.lowerBound]))
+                    remaining = remaining[end.upperBound...].drop(while: { $0.isWhitespace })
+                    // A bracketed name must be a complete list entry.
+                    if let next = remaining.first, next != "," {
+                        parts.removeLast()
+                        remaining = remaining.drop(while: { $0 != "," })
+                    }
+                } else {
+                    let end = remaining.firstIndex(of: ",") ?? remaining.endIndex
+                    parts.append(String(remaining[..<end]))
+                    remaining = remaining[end...]
+                }
+            }
+            return parts.compactMap { part -> String? in
+                let name = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Calendar names always identify their journal day.
+                guard PageName.isValid(name), JournalDate(pageName: name) == nil,
+                      seen.insert(PageName.key(name)).inserted else { return nil }
+                return name
+            }
+        }
+    }
+
     /// `title::` overrides the display name. (SPEC §4.2)
     public func displayTitle(
         using dateFormat: JournalDateFormat, locale: Locale = .current

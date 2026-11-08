@@ -14,8 +14,12 @@ struct SourceNumbering {
     }
 
     init(app: AppState, page: String) {
+        self.init(app: app, canonicalPage: app.store.canonicalPageName(for: page))
+    }
+
+    init(app: AppState, canonicalPage page: String) {
         let key = PageName.key(page)
-        let snapshot = (try? app.store.numbering(onPageNamed: page)) ?? OutlineNumbering.Snapshot(blocks: [])
+        let snapshot = (try? app.store.numbering(onCanonicalPageNamed: page)) ?? OutlineNumbering.Snapshot(blocks: [])
         let typography = OutlineMarkerLayout.typographyKey
         if let cached = app.sourceNumberingCache[key], cached.snapshot === snapshot,
            cached.typography == typography {

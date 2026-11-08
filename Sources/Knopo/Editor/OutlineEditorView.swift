@@ -750,6 +750,9 @@ final class OutlineEditorController: NSObject {
         autocomplete.fetchPages = { [weak self] query in
             self?.app.pageNames(matching: query) ?? []
         }
+        autocomplete.pageExists = { [weak self] name in
+            self?.app.pageExists(named: name) ?? false
+        }
         // `((`: full-text block search (SPEC §7.1).
         autocomplete.fetchBlocks = { [weak self] query in
             guard let self else { return [] }
@@ -1222,7 +1225,7 @@ final class OutlineEditorController: NSObject {
     private func refreshIfChanged() {
         let doc = app.document(for: pageName)
         let fresh = OutlineOps.visibleRows(in: doc.blocks, zoomRoot: zoom)
-        let source = SourceNumbering(app: app, page: pageName)
+        let source = SourceNumbering(app: app, canonicalPage: doc.name)
         let geometry = OutlineMarkerLayout.geometry(rows: fresh, markers: source.markers, widths: source.widths)
         if !matchesCurrent(fresh) || rows.contains(where: {
             $0.marker != source.markers[$0.block.id] || $0.geometry != geometry[$0.block.id]
@@ -1270,7 +1273,7 @@ final class OutlineEditorController: NSObject {
                 editSession = nil
             }
         }
-        let source = SourceNumbering(app: app, page: pageName)
+        let source = SourceNumbering(app: app, canonicalPage: doc.name)
         let markers = source.markers
         let geometry = OutlineMarkerLayout.geometry(rows: visible, markers: markers, widths: source.widths)
         let oldByID = oldRows.map { Dictionary(uniqueKeysWithValues: $0.map { ($0.block.id, $0) }) }
@@ -1461,13 +1464,13 @@ final class OutlineEditorController: NSObject {
         case .block(let id):
             guard let hit = app.store.resolveBlock(id) else { return nil }
             rootBlocks = [hit.block]
-            source = SourceNumbering(app: app, page: hit.pageName)
+            source = SourceNumbering(app: app, canonicalPage: hit.pageName)
             link = KnopoURL.block(id)
         case .page(let name):
-            let blocks = app.document(for: name).blocks
-            guard !blocks.isEmpty else { return nil }
-            rootBlocks = blocks
-            source = SourceNumbering(app: app, page: name)
+            let doc = app.document(for: name)
+            guard !doc.blocks.isEmpty else { return nil }
+            rootBlocks = doc.blocks
+            source = SourceNumbering(app: app, canonicalPage: doc.name)
             link = KnopoURL.page(name)
         }
         let nextVisited = visited.union([target])
@@ -1712,7 +1715,7 @@ final class OutlineEditorController: NSObject {
         var sources: [String: SourceNumbering] = [:]
         for hit in result.hits {
             if sources[hit.pageDisplayName] == nil {
-                sources[hit.pageDisplayName] = SourceNumbering(app: app, page: hit.pageDisplayName)
+                sources[hit.pageDisplayName] = SourceNumbering(app: app, canonicalPage: hit.pageDisplayName)
             }
             let source = sources[hit.pageDisplayName]!
             let marker = source.markers[hit.blockID]
@@ -2882,7 +2885,7 @@ final class OutlineEditorController: NSObject {
     func previewAttributedString(forPage name: String) -> NSAttributedString? {
         let doc = app.document(for: name)
         let out = NSMutableAttributedString()
-        let source = SourceNumbering(app: app, page: name)
+        let source = SourceNumbering(app: app, canonicalPage: doc.name)
         var parentContent: [Int: CGFloat] = [:]
         for row in OutlineOps.visibleRows(in: doc.blocks).prefix(10) {
             let origin = row.depth == 0 ? 0 : (parentContent[row.depth - 1] ?? 0)
@@ -2914,7 +2917,7 @@ final class OutlineEditorController: NSObject {
         var sources: [String: SourceNumbering] = [:]
         for hit in hits {
             if sources[hit.pageDisplayName] == nil {
-                sources[hit.pageDisplayName] = SourceNumbering(app: app, page: hit.pageDisplayName)
+                sources[hit.pageDisplayName] = SourceNumbering(app: app, canonicalPage: hit.pageDisplayName)
             }
             let source = sources[hit.pageDisplayName]!
             let marker = source.markers[hit.blockID]

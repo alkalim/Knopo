@@ -29,7 +29,7 @@ struct BlockResultList: View {
                         // ancestors to nest and to share breadcrumbs.
                         let ancestors = (try? app.store.cache.breadcrumbs(
                             ofBlocks: group.value.map(\.blockID))) ?? [:]
-                        let numbering = SourceNumbering(app: app, page: group.key)
+                        let numbering = SourceNumbering(app: app, canonicalPage: group.key)
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(ResultRowLayout.layout(group.value, ancestors: ancestors,
                                                            markers: numbering.markers, widths: numbering.widths),

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import KnopoCore
 
 
@@ -68,6 +69,7 @@ final class Navigator: ObservableObject {
     let find = FindCoordinator()
 
     private var history = NavHistory()
+    private var graphChanges: AnyCancellable?
 
     init(app: AppState) {
         self.app = app
@@ -92,14 +94,18 @@ final class Navigator: ObservableObject {
             .compactMap { pane in paneTarget(pane.target).map { RightPane(target: $0, collapsed: pane.collapsed) } }
             .deduplicatedByTarget()
         restored = true
+        graphChanges = app.$dataVersion.dropFirst().sink { [weak self] _ in
+            self?.refreshResolvedTargets()
+        }
     }
 
     // MARK: - Navigation
 
     func navigate(to target: NavTarget, recordVisit: Bool = true) {
+        guard target != current else { return }
+        app.flushPendingSaves()
         guard let resolved = resolve(target) else { return }
         guard resolved != current else { return }
-        app.flushPendingSaves()
         history.push(from: current)
         current = resolved
         closeFind() // find is per-page; navigating away dismisses it
@@ -131,7 +137,7 @@ final class Navigator: ObservableObject {
     /// Navigate to a just-created page and focus its (empty) first block so the
     /// user can type immediately.
     func navigateToNewPage(named name: String) {
-        focusFirstBlock = name
+        focusFirstBlock = app.store.canonicalPageName(for: name)
         navigate(to: .page(name: name))
     }
 
@@ -140,7 +146,10 @@ final class Navigator: ObservableObject {
     /// card: the sidebar is a set of reference views, and two editors over one
     /// document would alias.
     func openInRightSidebar(_ target: NavTarget, reveal: Bool = true) {
+        app.flushPendingSaves()
         guard let resolved = paneTarget(target) else { return }
+        // A previously opened stub may now be an alias of another pane's page.
+        refreshResolvedTargets()
         rightPaneNavigationToken += 1
         defer { if reveal { rightPaneRevealToken += 1 } }
         guard let i = rightPanes.firstIndex(where: { $0.target.showsSame(as: resolved) }) else {
@@ -220,7 +229,7 @@ final class Navigator: ObservableObject {
             guard let t = history.goBack(from: target) else { break }
             target = t; moved = true
         }
-        if moved { current = target }
+        if moved { current = resolve(target) ?? target }
     }
 
     func goForward(steps: Int = 1) {
@@ -230,7 +239,7 @@ final class Navigator: ObservableObject {
             guard let t = history.goForward(from: target) else { break }
             target = t; moved = true
         }
-        if moved { current = target }
+        if moved { current = resolve(target) ?? target }
     }
 
     private func historyTitle(_ target: NavTarget) -> String {
@@ -300,12 +309,29 @@ final class Navigator: ObservableObject {
             guard let pageName = app.resolvePageName(forZoom: zoom) else { return nil }
             return .page(name: pageName, zoom: zoom)
         }
+        if case .page(let name, let zoom) = target {
+            return .page(name: app.store.canonicalPageName(for: name), zoom: zoom)
+        }
         return target
     }
 
     // MARK: - Page operations that affect this window's current target
 
+    private func refreshResolvedTargets() {
+        if let resolved = resolve(current), resolved != current {
+            current = resolved
+            closeFind()
+        }
+        let panes = rightPanes.compactMap { pane in
+            paneTarget(pane.target).map { RightPane(target: $0, collapsed: pane.collapsed) }
+        }.deduplicatedByTarget()
+        if panes != rightPanes { rightPanes = panes }
+    }
+
     func renamePage(from old: String, to new: String) throws {
+        app.flushPendingSaves()
+        refreshResolvedTargets()
+        let old = app.store.canonicalPageName(for: old)
         try app.renamePage(from: old, to: new)
         let oldKey = PageName.key(old)
         if case .page(let name, let zoom) = current, PageName.key(name) == oldKey {
@@ -329,6 +355,9 @@ final class Navigator: ObservableObject {
     }
 
     func deletePage(named name: String) throws {
+        app.flushPendingSaves()
+        refreshResolvedTargets()
+        let name = app.store.canonicalPageName(for: name)
         try app.deletePage(named: name)
         if current.pageName.map({ PageName.key($0) == PageName.key(name) }) == true {
             current = .journalHome
