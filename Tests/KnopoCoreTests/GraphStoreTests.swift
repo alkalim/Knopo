@@ -5,6 +5,37 @@ import GRDB
 
 @Suite struct GraphStoreTests {
 
+    @Test func parserUpgradeSkipsNonUTF8Files() throws {
+        let store = try makeGraph(["Other": "- unchanged\n"])
+        defer { try? FileManager.default.removeItem(at: store.root) }
+        let url = store.fileURL(forPageNamed: "Legacy")
+        try Data([0xff, 0xfe, 0x41, 0x00]).write(to: url)
+        try store.cache.indexPage(PageDocument(name: "Legacy", fileExists: true),
+                                  stamp: GraphStore.stamp(of: url))
+        try store.cache.setIndexVersion(7)
+        let reopened = try GraphStore(root: store.root)
+        expectEqual(reopened.cache.indexVersion, CacheDB.indexVersion)
+        expectEqual(try reopened.cache.searchBlocks("unchanged").count, 1)
+        expectEqual(try Data(contentsOf: url), Data([0xff, 0xfe, 0x41, 0x00]))
+    }
+
+    @Test func olderIndexesDiscoverDashlessHeadingsWithoutRewritingFiles() throws {
+        let text = "status:: open\n# Heading [[Target]] #match\n  status:: closed\n- body\n"
+        let store = try makeGraph(["Logseq": text, "Other": "- ```swift\n  let x = 1\n  ```\n"])
+        defer { try? FileManager.default.removeItem(at: store.root) }
+        let url = store.fileURL(forPageNamed: "Logseq")
+        try store.cache.indexPage(PageDocument(name: "Logseq", blocks: [Block(content: "body")],
+                                              fileExists: true), stamp: GraphStore.stamp(of: url))
+        try store.cache.setIndexVersion(7)
+        let reopened = try GraphStore(root: store.root)
+        expectEqual(reopened.cache.indexVersion, CacheDB.indexVersion)
+        expectEqual(try reopened.cache.searchBlocks("Heading").count, 1)
+        expectEqual(try reopened.cache.backlinks(of: PageName.key("Target")).count, 1)
+        expectEqual(try reopened.cache.blocks(taggedWith: "match").count, 1)
+        expectEqual(reopened.cache.indexStats.full, 1)
+        expectEqual(try String(contentsOf: url, encoding: .utf8), text)
+    }
+
     @Test func oldIndexVersionsRebuildUnchangedCRLFFiles() throws {
         let store = try makeGraph([
             "Windows": "title\r\n- one #match\r\n  knopo.list-type:: ordered\r\n- two [[Target]]\r\n",

@@ -536,13 +536,25 @@ enum BlockRenderer {
         lineHeight(for: pinnedFont(forSource: source))
     }
 
+    /// A heading's first paragraph uses heading metrics. Its continuation
+    /// paragraphs and property lines use normal body metrics.
+    static func pinBlockLineHeights(
+        _ string: NSMutableAttributedString, kind: BlockKind, lineSpacing: CGFloat
+    ) {
+        pinLineHeight(string, lineHeight(forSource: ""), lineSpacing: lineSpacing)
+        if string.length > 0, case .heading(let level, _) = kind {
+            let first = (string.string as NSString).paragraphRange(for: NSRange(location: 0, length: 0))
+            pinLineHeight(string, lineHeight(for: headingFont(level: level)), lineSpacing: lineSpacing, range: first)
+        }
+    }
+
     private static let lineHeights: NSCache<NSFont, NSNumber> = {
         let cache = NSCache<NSFont, NSNumber>()
         cache.countLimit = 64
         return cache
     }()
 
-    private static func lineHeight(for font: NSFont) -> CGFloat {
+    static func lineHeight(for font: NSFont) -> CGFloat {
         if let height = lineHeights.object(forKey: font) { return CGFloat(truncating: height) }
         // Font metrics do not depend on width. Reuse them across rows and resizes.
         let height = (NSLayoutManager().defaultLineHeight(for: font) * lineHeightScale).rounded()
@@ -619,14 +631,15 @@ enum BlockRenderer {
 
     static func render(content: String, context: Context) -> NSAttributedString {
         var imageIndex = 0
-        let body = renderBody(content: content, context: context, imageIndex: &imageIndex)
+        let kind = BlockKind.classify(content)
+        let body = renderBody(content: content, kind: kind, context: context, imageIndex: &imageIndex)
         guard let mutable = body.mutableCopy() as? NSMutableAttributedString else { return body }
         shrinkEmoji(mutable, scale: emojiScale)
         // A table's "wrapped lines" are its rows: they must abut so the grid
         // reads as one figure, so it takes no inter-line spacing.
-        let isTable = context.tables && BlockKind.classify(content).isTable
-        pinLineHeight(mutable, lineHeight(forSource: context.compactHeadings ? "" : content),
-                      lineSpacing: isTable ? 0 : lineSpacing)
+        let isTable = context.tables && kind.isTable
+        pinBlockLineHeights(mutable, kind: context.compactHeadings ? .paragraph(text: "", todo: nil) : kind,
+                           lineSpacing: isTable ? 0 : lineSpacing)
         return mutable
     }
 
@@ -655,9 +668,9 @@ enum BlockRenderer {
     }
 
     private static func renderBody(
-        content: String, context: Context, imageIndex: inout Int
+        content: String, kind: BlockKind, context: Context, imageIndex: inout Int
     ) -> NSAttributedString {
-        var kind = BlockKind.classify(content)
+        var kind = kind
         // Where a table can't be laid out or drawn (§5.2), it reads as its raw
         // pipe source — the honest snippet, not a half-rendered grid.
         if kind.isTable, !context.tables { kind = .paragraph(text: content, todo: nil) }
@@ -697,9 +710,18 @@ enum BlockRenderer {
                                context: context, imageIndex: &imageIndex)
         case .heading(let level, let text):
             let font = context.compactHeadings ? bolder(baseFont()) : headingFont(level: level)
-            return inline(text, baseFont: font,
-                          sourceBase: sourceBase(of: text, in: content),
-                          context: context, imageIndex: &imageIndex)
+            let parts = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            let heading = String(parts.first ?? "")
+            let offset = sourceBase(of: text, in: content)
+            let out = NSMutableAttributedString(attributedString: inline(
+                heading, baseFont: font, sourceBase: offset, context: context, imageIndex: &imageIndex))
+            if parts.count > 1 {
+                out.append(NSAttributedString(string: "\n", attributes: [.font: font]))
+                out.append(inline(String(parts[1]), baseFont: baseFont(),
+                                  sourceBase: offset.map { $0 + (heading as NSString).length + 1 },
+                                  context: context, imageIndex: &imageIndex))
+            }
+            return out
         case .quote(let text):
             // Every line gets the quote bar; continuation lines may carry
             // their own `> ` marker (stripped) or none (Shift+Enter).

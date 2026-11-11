@@ -8,7 +8,7 @@ public struct PageDocument: Identifiable, Sendable {
     public var name: String
     /// Top-level blocks.
     public var blocks: [Block]
-    /// Verbatim lines preceding the first bullet, preserved for round-trip.
+    /// Page properties and other text preceding the first outline block.
     public var preamble: String
     /// Whether the page lives in `journals/` (or is named like an ISO date there).
     public var isJournal: Bool
@@ -44,9 +44,71 @@ public struct PageDocument: Identifiable, Sendable {
     /// Properties written in the preamble — un-bulleted `key:: value` lines
     /// before the first block (the Logseq page-property convention). Indexed
     /// alongside the first block's own properties so they're queryable; the
-    /// preamble text itself round-trips untouched. Non-property lines are ignored.
+    /// unedited source lines round-trip untouched. Fenced examples are ignored.
     public var preambleProperties: [BlockProperty] {
-        preamble.components(separatedBy: "\n").compactMap(PageParser.matchProperty)
+        preamblePropertyLines.map(\.property)
+    }
+
+    private var preamblePropertyLines: [(line: Int, property: BlockProperty)] {
+        preambleLines.enumerated().compactMap { index, line in
+            guard let property = line.property else { return nil }
+            return (index, property)
+        }
+    }
+
+    /// Source lines with page properties identified separately from fenced examples.
+    public var preambleLines: [(text: String, property: BlockProperty?)] {
+        let lines = PageParser.splitKeepingTerminators(preamble)
+        let fences = PageParser.preambleFenceLines(lines)
+        return lines.enumerated().map { index, line in
+            let text = PageParser.chomp(String(line))
+            return (text, fences.contains(index) ? nil : PageParser.matchProperty(text))
+        }
+    }
+
+    /// Replaces or removes one page property, preserving all other source lines.
+    /// An index equal to the property count appends a new property.
+    @discardableResult
+    public mutating func setPreambleProperty(at index: Int, to property: BlockProperty?) -> Bool {
+        if let property, !Self.isValidPreambleProperty(property) { return false }
+        let existing = preamblePropertyLines
+        guard index >= 0, index <= existing.count else { return false }
+        var lines = PageParser.splitKeepingTerminators(preamble).map(String.init)
+        if index == existing.count {
+            guard let property else { return false }
+            return insertPreambleProperty(property, at: index)
+        } else {
+            let source = existing[index]
+            guard property != source.property else { return true }
+            if let property {
+                let ending = lines[source.line].last?.isNewline == true
+                    ? String(lines[source.line].suffix(1)) : ""
+                lines[source.line] = "\(property.key):: \(property.value)" + ending
+            } else {
+                lines.remove(at: source.line)
+            }
+            preamble = lines.joined()
+        }
+        return true
+    }
+
+    /// Inserts a property between existing rows without rewriting their source.
+    @discardableResult
+    public mutating func insertPreambleProperty(_ property: BlockProperty, at index: Int) -> Bool {
+        let existing = preamblePropertyLines
+        guard Self.isValidPreambleProperty(property), index >= 0, index <= existing.count else { return false }
+        var lines = PageParser.splitKeepingTerminators(preamble).map(String.init)
+        let newline = lines.first(where: { $0.last?.isNewline == true }).map { String($0.suffix(1)) } ?? "\n"
+        let position = index < existing.count ? existing[index].line : existing.last.map { $0.line + 1 } ?? 0
+        if position > 0, lines[position - 1].last?.isNewline != true { lines[position - 1] += newline }
+        lines.insert("\(property.key):: \(property.value)" + newline, at: position)
+        preamble = lines.joined()
+        return true
+    }
+
+    public static func isValidPreambleProperty(_ property: BlockProperty) -> Bool {
+        !property.value.contains(where: \.isNewline)
+            && PageParser.matchProperty("\(property.key):: \(property.value)") == property
     }
 
     /// `title::` overrides the display name. (SPEC §4.2)

@@ -148,13 +148,13 @@ public final class GraphStore {
         self.cache = cache
         self.pagePersistence = PagePersistence(root: root, cache: cache)
         self.config = GraphConfig.load(from: root.appendingPathComponent(".knopo/config.json"))
-        // Version 7 only changes CRLF parsing. Earlier versions also changed
-        // page identity and need a full rebuild.
+        // Parser upgrades scan existing files but only reindex affected pages.
+        // Earlier versions changed page identity and need a full rebuild.
         let previousVersion = cache.indexVersion
         let staleIndex = previousVersion != CacheDB.indexVersion
-        let repairCRLF = previousVersion == 6 && CacheDB.indexVersion == 7
+        let repairParsing = (6...7).contains(previousVersion) && CacheDB.indexVersion == 8
         let onDisk = try Self.synchronizeIndexFiles(at: root, cache: cache,
-            force: staleIndex && !repairCRLF, repairCRLF: repairCRLF)
+            force: staleIndex && !repairParsing, parsingVersion: repairParsing ? previousVersion : nil)
         pruneStaleFavourites(onDisk: onDisk)
         if staleIndex { try cache.setIndexVersion(CacheDB.indexVersion) }
     }
@@ -185,7 +185,7 @@ public final class GraphStore {
     /// Shared file synchronization for startup, external force-sync, and the
     /// user-triggered rebuild. Returns the on-disk keys for config cleanup.
     private static func synchronizeIndexFiles(
-        at root: URL, cache: CacheDB, force: Bool, repairCRLF: Bool = false
+        at root: URL, cache: CacheDB, force: Bool, parsingVersion: Int? = nil
     ) throws -> Set<String> {
         let files = resolvedFiles(at: root)
         let onDisk = Set(files.map(\.key))
@@ -200,12 +200,22 @@ public final class GraphStore {
             guard let stamp = Self.stamp(of: url) else { continue }
             var text: String?
             if !force, known[key] == stamp {
-                guard repairCRLF else { continue }
-                text = try String(contentsOf: url, encoding: .utf8)
-                guard text?.contains("\r\n") == true else { continue }
+                guard let parsingVersion else { continue }
+                text = try? String(contentsOf: url, encoding: .utf8)
+                guard let source = text else { continue }
+                let crlfChanged = parsingVersion == 6 && source.contains("\r\n")
+                let lines = PageParser.splitKeepingTerminators(source)
+                let markdownChanged = !PageParser.preambleFenceLines(lines).isEmpty || lines.contains { line in
+                    if line.first == "#", case .heading = BlockKind.classify(PageParser.chomp(String(line))) {
+                        return true
+                    }
+                    return false
+                }
+                let bareCRChanged = source.contains("\r")
+                guard crlfChanged || bareCRChanged || markdownChanged else { continue }
             }
             var doc = Self.read(url: url, name: name, isJournal: isJournal, text: text)
-            if known[key] == stamp, !repairCRLF {
+            if known[key] == stamp {
                 try cache.reuseIndexedIDs(in: &doc, stamp: stamp)
             }
             try cache.indexPage(doc, stamp: stamp, force: force)
@@ -537,7 +547,15 @@ public final class GraphStore {
         for sourceKey in try cache.pagesUsingTag(old) {
             guard let display = try cache.page(key: sourceKey)?.displayName else { continue }
             var doc = page(named: display)
-            if rewriteBlocks(&doc.blocks, regex: regex, replacement: replacement) {
+            var changed = rewriteBlocks(&doc.blocks, regex: regex, replacement: replacement)
+            for (index, property) in doc.preambleProperties.enumerated() where property.key.lowercased() == "tags" {
+                let value = PageTagValue.rename(old, to: new, in: property.value)
+                if value != property.value {
+                    doc.setPreambleProperty(at: index, to: BlockProperty(key: property.key, value: value))
+                    changed = true
+                }
+            }
+            if changed {
                 updatePage(doc)
                 try savePage(named: doc.name)
                 touched.insert(sourceKey)

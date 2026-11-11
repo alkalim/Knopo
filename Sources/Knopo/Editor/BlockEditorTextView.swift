@@ -807,12 +807,9 @@ final class BlockEditorTextView: NSTextView {
         ].compactMap { $0 }
     }()
 
-    /// The base font for the whole raw source: a heading block edits at its
-    /// rendered size, so focusing never changes row height (no "vibration").
-    private static func baseFont(for source: String) -> NSFont {
-        switch BlockKind.classify(source) {
-        case .heading(let level, _):
-            return BlockRenderer.headingFont(level: level)
+    /// The base font for the raw source. Heading fonts are applied per paragraph.
+    private static func baseFont(for kind: BlockKind) -> NSFont {
+        switch kind {
         case .fence:
             // Editing a fenced code block shows it monospaced, matching the
             // rendered view's code font (same size, so the pinned line height
@@ -857,12 +854,13 @@ final class BlockEditorTextView: NSTextView {
         guard !hasMarkedText(), let storage = textStorage else { return }
         let full = NSRange(location: 0, length: storage.length)
         let source = storage.string
-        let base = Self.baseFont(for: source)
+        let kind = BlockKind.classify(source)
+        let base = Self.baseFont(for: kind)
         // Pin the line height to match the rendered view, so emoji (whose
         // substituted font carries extra leading) don't make the focused row
         // taller than the rendered one — no vertical jitter on focus (§5.4).
         let paragraph = NSMutableParagraphStyle()
-        let lineHeight = BlockRenderer.lineHeight(forSource: source)
+        let lineHeight = BlockRenderer.lineHeight(forSource: "")
         paragraph.minimumLineHeight = lineHeight
         paragraph.maximumLineHeight = lineHeight
         // Match the rendered view's wrapped-line spacing so the row height (and
@@ -873,38 +871,51 @@ final class BlockEditorTextView: NSTextView {
             [.font: base, .foregroundColor: BlockRenderer.bodyColor, .paragraphStyle: paragraph],
             range: full
         )
+        if full.length > 0, case .heading(let level, _) = kind {
+            let first = (source as NSString).paragraphRange(for: NSRange(location: 0, length: 0))
+            storage.addAttribute(.font, value: BlockRenderer.headingFont(level: level), range: first)
+        }
+        BlockRenderer.pinBlockLineHeights(storage, kind: kind, lineSpacing: BlockRenderer.lineSpacing)
         // Inside a fenced code block the content is code, not markdown, so skip
         // the inline rules: it stays plain monospace, and a `#`/`>`-prefixed
         // code line isn't dimmed like a heading or quote.
         let isFence: Bool
-        if case .fence = BlockKind.classify(source) { isFence = true } else { isFence = false }
+        if case .fence = kind { isFence = true } else { isFence = false }
         for rule in Self.rules where !isFence {
-            var attrs = rule.attributes
-            switch rule.fontStyle {
-            case .none:
-                break
-            case .bold:
-                attrs[.font] = BlockRenderer.bolder(base)
-            case .mono:
-                attrs[.font] = NSFont.monospacedSystemFont(
-                    ofSize: base.pointSize - 1, weight: .regular)
-            }
             rule.regex.enumerateMatches(in: source, options: [], range: full) { match, _, _ in
                 guard let match else { return }
+                var attrs = rule.attributes
+                let font = storage.attribute(.font, at: match.range.location, effectiveRange: nil) as? NSFont ?? base
+                switch rule.fontStyle {
+                case .none: break
+                case .bold: attrs[.font] = BlockRenderer.bolder(font)
+                case .mono:
+                    attrs[.font] = NSFont.monospacedSystemFont(ofSize: font.pointSize - 1, weight: .regular)
+                }
                 storage.addAttributes(attrs, range: match.range)
             }
         }
         // A table's pipes and delimiter row are structure, not content: dim them
         // so the focused source reads as the grid it renders to (§5.2). Cell text
         // keeps the inline highlighting above.
-        if case .table = BlockKind.classify(source) {
+        if case .table = kind {
             dimTableSyntax(storage, source: source)
         }
         // Match the rendered view's emoji size so they don't grow on focus.
         BlockRenderer.shrinkEmoji(storage, scale: BlockRenderer.emojiScale)
         storage.endEditing()
-        typingAttributes = [
-            .font: base, .foregroundColor: BlockRenderer.bodyColor, .paragraphStyle: paragraph,
-        ]
+        let caret = min(selectedRange().location, storage.length)
+        let firstEnd = (source as NSString).range(of: "\n").location
+        let inHeading = firstEnd == NSNotFound || caret <= firstEnd
+        let typingFont: NSFont
+        if inHeading, case .heading(let level, _) = kind {
+            typingFont = BlockRenderer.headingFont(level: level)
+            let height = BlockRenderer.lineHeight(for: typingFont)
+            paragraph.minimumLineHeight = height
+            paragraph.maximumLineHeight = height
+        } else {
+            typingFont = base
+        }
+        typingAttributes = [.font: typingFont, .foregroundColor: BlockRenderer.bodyColor, .paragraphStyle: paragraph]
     }
 }

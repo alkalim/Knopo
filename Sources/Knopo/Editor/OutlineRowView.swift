@@ -529,8 +529,6 @@ final class OutlineRowCell: NSTableCellView {
     }()
 
     static func height(for attributed: NSAttributedString, contentWidth: CGFloat) -> CGFloat {
-        let layout = measuringLayout
-        layout.textContainer?.size = NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
         let text: NSAttributedString
         if attributed.length > 0 {
             text = attributed
@@ -540,10 +538,17 @@ final class OutlineRowCell: NSTableCellView {
             BlockRenderer.pinLineHeight(space, BlockRenderer.lineHeight(forSource: ""))
             text = space
         }
+        return max(minRowHeight, textHeight(for: text, contentWidth: contentWidth)
+                   + contentInset(for: text) * 2 + verticalPadding * 2)
+    }
+
+    /// Measure without changing a text view or contacting its input method.
+    static func textHeight(for text: NSAttributedString, contentWidth: CGFloat) -> CGFloat {
+        let layout = measuringLayout
+        layout.textContainer?.size = NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
         measuringContent.textStorage?.setAttributedString(text)
         layout.ensureLayout(for: layout.documentRange)
-        return max(minRowHeight, ceil(layout.usageBoundsForTextContainer.height)
-                   + contentInset(for: text) * 2 + verticalPadding * 2)
+        return ceil(layout.usageBoundsForTextContainer.height)
     }
 
     /// Leave room for table rules and backgrounds in both measured and displayed rows.
@@ -656,6 +661,7 @@ extension NSAttributedString.Key {
 }
 
 final class RenderedTextView: NSTextView {
+    var allowsTextSelection = false
 
     var onLinkClick: (URL, Bool) -> Void = { _, _ in }
     var onFocusRequest: (Int) -> Void = { _ in }
@@ -677,12 +683,9 @@ final class RenderedTextView: NSTextView {
     var allowsImageResize = true {
         didSet { window?.invalidateCursorRects(for: self) }
     }
-    /// Right-click shows the block context menu (Copy as Markdown, etc.), not the
-    /// stock text-view menu — whose Copy would serialize the *rendered* attributed
-    /// string (image/checkbox attachments as `U+FFFC`, `↗` on links, display-title
-    /// refs). Handled here (no `super`) so the view also never steals first
-    /// responder, which would then route a following Cmd+C to that same junk copy.
-    var onContextMenu: (NSEvent) -> Void = { _ in }
+    /// Block menus copy Markdown instead of rendered attachments and link labels.
+    /// Without a callback, forward context clicks to the enclosing view's menu.
+    var onContextMenu: ((NSEvent) -> Void)?
 
     private var hoverWork: DispatchWorkItem?
     private var hoverRange: NSRange?
@@ -957,6 +960,10 @@ final class RenderedTextView: NSTextView {
         // Take the preview down first. The click then does its own job.
         cancelHover()
         onHoverEnded()
+        if event.modifierFlags.contains(.control) {
+            rightMouseDown(with: event)
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         let imageHit = imageHandle(at: point)
         if let image = imageHit {
@@ -972,6 +979,10 @@ final class RenderedTextView: NSTextView {
             onLinkClick(url, wantsSidebar)
             return
         }
+        if allowsTextSelection {
+            super.mouseDown(with: event)
+            return
+        }
         // On non-link text, Shift/Cmd+click is node selection, not editing.
         if wantsSidebar {
             onSelectRequest(flags.contains(.shift), flags.contains(.command))
@@ -983,7 +994,9 @@ final class RenderedTextView: NSTextView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        onContextMenu(event) // block menu; deliberately no super (see onContextMenu)
+        if allowsTextSelection { super.rightMouseDown(with: event); return }
+        if let onContextMenu { onContextMenu(event) }
+        else { nextResponder?.rightMouseDown(with: event) }
     }
 
     /// Insertion index for a point that may lie outside the text — a click in the

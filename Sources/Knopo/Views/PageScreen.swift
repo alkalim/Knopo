@@ -14,6 +14,10 @@ struct PageScreen: View {
 
     @State private var renameSheetShown = false
     @State private var renameText = ""
+    var addPropertyRequest: UUID? = nil
+    var onPropertyRequestHandled: () -> Void = {}
+    @State private var localPropertyRequest: UUID?
+    @StateObject private var propertySession = PagePropertyEditSession()
 
     var body: some View {
         let _ = app.dataVersion
@@ -27,16 +31,17 @@ struct PageScreen: View {
             if zoom != nil {
                 BreadcrumbBar(pageName: pageName, zoom: zoom)
             }
-            // Leading content before the first bullet (e.g. a bare `# Heading`)
-            // lives in the page preamble: preserved byte-stably but not a block,
-            // so it can't be edited here. Render it read-only so it isn't hidden.
-            if zoom == nil, let preamble = preambleAttributed(doc.preamble) {
-                Text(AttributedString(preamble))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 0) {
+                if zoom == nil {
+                    PageMetadataView(pageName: pageName, session: propertySession, addRequest: localPropertyRequest ?? addPropertyRequest,
+                                     onRequestHandled: {
+                        localPropertyRequest = nil
+                        onPropertyRequestHandled()
+                    })
+                }
+                OutlineEditorView(pageName: pageName, zoom: zoom, inPane: inPane,
+                                  initialWidth: initialOutlineWidth, pagePropertySession: zoom == nil ? propertySession : nil)
             }
-            OutlineEditorView(pageName: pageName, zoom: zoom, inPane: inPane,
-                              initialWidth: initialOutlineWidth)
             if !inPane {
                 Divider().padding(.vertical, 8)
                 ReferencesSection(pageName: pageName)
@@ -55,40 +60,6 @@ struct PageScreen: View {
             }
         }
         .sheet(isPresented: $renameSheetShown) { renameSheet }
-    }
-
-    /// Renders the page preamble (lines before the first bullet) as read-only
-    /// markdown, one rendered line per source line so a leading `# Heading`
-    /// shows as a heading. Nil when the preamble is empty.
-    private func preambleAttributed(_ preamble: String) -> NSAttributedString? {
-        let lines = preamble.components(separatedBy: "\n")
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard !lines.isEmpty else { return nil }
-        let ctx = BlockRenderer.Context(
-            resolveBlockRef: { app.store.resolveBlock($0)?.block.content },
-            assetsDir: app.store.assetsDir)
-        // A `key:: value` line is a page property: render it dimmed as `key: value`
-        // like block properties (§3.2), not as plain body text. Other preamble
-        // lines (e.g. a leading `# Heading`) render as markdown.
-        let keyAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: BlockRenderer.baseFontSize, weight: .medium),
-            .foregroundColor: NSColor.tertiaryLabelColor,
-        ]
-        let valueAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: BlockRenderer.baseFontSize),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]
-        let out = NSMutableAttributedString()
-        for line in lines {
-            if out.length > 0 { out.append(NSAttributedString(string: "\n")) }
-            if let prop = PageParser.matchProperty(line) {
-                out.append(NSAttributedString(string: "\(prop.key): ", attributes: keyAttrs))
-                out.append(NSAttributedString(string: prop.value, attributes: valueAttrs))
-            } else {
-                out.append(BlockRenderer.render(content: line, context: ctx))
-            }
-        }
-        return out
     }
 
     private func header(_ doc: PageDocument) -> some View {
@@ -114,6 +85,8 @@ struct PageScreen: View {
                     renameSheetShown = true
                 }
                 .disabled(doc.isJournal)
+                Button("Add Page Property") { localPropertyRequest = UUID() }
+                    .disabled(zoom != nil)
                 Button("Open in Sidebar") {
                     nav.openInRightSidebar(.page(name: pageName, zoom: zoom))
                 }

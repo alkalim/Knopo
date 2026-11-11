@@ -5,6 +5,7 @@ import GRDB
 /// One row of backlink lookup: a block somewhere in the graph that references
 /// the page in question (SPEC §9.1).
 public struct BacklinkHit: Equatable, Sendable {
+    public var isPageResult: Bool { blockID == CacheDB.pageHitBlockID }
     public var blockID: UUID
     public var pageKey: String
     public var pageDisplayName: String
@@ -168,7 +169,8 @@ public final class CacheDB: @unchecked Sendable {
     /// v3: canonicalize date page keys to ISO (cross-spelling journal refs).
     /// v6: recognize the friendly date form `Jun 10th, 2026` as a journal day.
     /// v7: parse CRLF files into individual lines and blocks.
-    public static let indexVersion: Int = 7
+    /// v8: recognize dash-less headings as outline blocks.
+    public static let indexVersion: Int = 8
 
     /// The index version this cache was last built with (PRAGMA user_version,
     /// independent of the schema migrator). 0 on a fresh/old database.
@@ -332,6 +334,24 @@ public final class CacheDB: @unchecked Sendable {
                 CREATE INDEX IF NOT EXISTS tags_block ON tags(block_id);
                 CREATE INDEX IF NOT EXISTS props_block ON props(block_id);
                 """)
+        }
+        migrator.registerMigration("v8-page-tags") { db in
+            try db.execute(sql: """
+                CREATE TABLE page_tags (
+                    page_key TEXT NOT NULL,
+                    tag TEXT NOT NULL,
+                    PRIMARY KEY (page_key, tag)
+                );
+                CREATE INDEX page_tags_tag ON page_tags(tag);
+                """)
+            // Existing property rows contain everything needed for this upgrade.
+            for row in try Row.fetchAll(db, sql: "SELECT page_key, value FROM page_props WHERE lower(key) = 'tags'") {
+                let value: String = row["value"]
+                for token in PageTagValue.tokens(in: value) {
+                    try db.execute(sql: "INSERT OR IGNORE INTO page_tags VALUES (?, ?)",
+                                   arguments: [row["page_key"] as String, token.name])
+                }
+            }
         }
         try migrator.migrate(dbQueue)
     }
@@ -592,7 +612,13 @@ public final class CacheDB: @unchecked Sendable {
     private static func insertPageProps(
         _ db: Database, page: PageDocument, key: String
     ) throws {
+        try db.execute(sql: "DELETE FROM page_tags WHERE page_key = ?", arguments: [key])
         for property in page.preambleProperties {
+            if property.key.lowercased() == "tags" {
+                for token in PageTagValue.tokens(in: property.value) {
+                    try db.execute(sql: "INSERT OR IGNORE INTO page_tags VALUES (?, ?)", arguments: [key, token.name])
+                }
+            }
             try db.execute(
                 sql: "INSERT INTO page_props (page_key, key, value) VALUES (?, ?, ?)",
                 arguments: [key, property.key, property.value])
@@ -720,6 +746,7 @@ public final class CacheDB: @unchecked Sendable {
         try db.execute(sql: "DELETE FROM tags WHERE page_key = ?", arguments: [key])
         try db.execute(sql: "DELETE FROM props WHERE page_key = ?", arguments: [key])
         try db.execute(sql: "DELETE FROM page_props WHERE page_key = ?", arguments: [key])
+        try db.execute(sql: "DELETE FROM page_tags WHERE page_key = ?", arguments: [key])
     }
 
     public func fileStamp(forPageKey key: String) throws -> FileStamp? {
@@ -754,7 +781,7 @@ public final class CacheDB: @unchecked Sendable {
 
     public func clearAll() throws {
         try dbQueue.write { db in
-            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {
+            for table in ["pages", "blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props", "page_tags"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
@@ -771,7 +798,7 @@ public final class CacheDB: @unchecked Sendable {
     /// A forced rebuild must also remove rows whose owning page is missing.
     func removeOrphanedRows() throws {
         try dbQueue.write { db in
-            for table in ["blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props"] {
+            for table in ["blocks", "blocks_fts", "page_refs", "block_refs", "tags", "props", "page_props", "page_tags"] {
                 try db.execute(sql: "DELETE FROM \(table) WHERE page_key NOT IN (SELECT name_key FROM pages)")
             }
         }
@@ -801,17 +828,13 @@ public final class CacheDB: @unchecked Sendable {
         }
     }
 
-    /// Journal pages, most recent day first.
-    /// What makes a journal day count as having something in it: a block with
-    /// actual text. Deliberately *not* `PageDocument.isEffectivelyEmpty`, which
-    /// also counts a blank block carrying properties — for persistence, keeping a
-    /// block that owns an `id::` matters; for the feed, a day holding one blank
-    /// bullet is a day with nothing to read.
-    private static let hasContentBlock = """
-        EXISTS (
+    /// Page properties and block text are visible content in the feed.
+    /// A blank block with only an ID still has nothing to read.
+    private static let hasJournalContent = """
+        (EXISTS (
             SELECT 1 FROM blocks b WHERE b.page_key = p.name_key
               AND TRIM(b.content, ' ' || char(9) || char(10) || char(13)) <> ''
-        )
+        ) OR EXISTS (SELECT 1 FROM page_props pp WHERE pp.page_key = p.name_key))
         """
 
     /// Journal day keys that have something in them, newest first — what the
@@ -823,7 +846,7 @@ public final class CacheDB: @unchecked Sendable {
             try String.fetchAll(db, sql: """
                 SELECT p.name_key FROM pages p
                 WHERE p.is_journal = 1 AND p.journal_date IS NOT NULL
-                  AND \(Self.hasContentBlock)
+                  AND \(Self.hasJournalContent)
                 ORDER BY p.journal_date DESC
                 """)
         }
@@ -853,7 +876,7 @@ public final class CacheDB: @unchecked Sendable {
                 SELECT GROUP_CONCAT(name_key) FROM (
                     SELECT p.name_key AS name_key FROM pages p
                     WHERE p.is_journal = 1 AND p.journal_date IS NOT NULL
-                      AND \(Self.hasContentBlock)
+                      AND \(Self.hasJournalContent)
                     ORDER BY p.name_key
                 )
                 """) ?? ""
@@ -1056,12 +1079,15 @@ public final class CacheDB: @unchecked Sendable {
 
     public func allTags() throws -> [(tag: String, count: Int)] {
         try dbQueue.read { db in
-            try Row.fetchAll(
-                db,
-                // Most-used first so the sidebar's capped list keeps the
-                // tags that matter; alphabetical breaks ties.
-                sql: "SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag ORDER BY n DESC, tag"
-            ).map { ($0["tag"], $0["n"]) }
+            var counts: [String: Int] = [:]
+            for table in ["tags", "page_tags"] {
+                for row in try Row.fetchAll(db, sql: "SELECT tag, COUNT(*) AS n FROM \(table) GROUP BY tag") {
+                    counts[row["tag"] as String, default: 0] += row["n"] as Int
+                }
+            }
+            return counts.map { (tag: $0.key, count: $0.value) }.sorted {
+                $0.count == $1.count ? $0.tag < $1.tag : $0.count > $1.count
+            }
         }
     }
 
@@ -1090,6 +1116,21 @@ public final class CacheDB: @unchecked Sendable {
                     content: row["content"]
                 )
             }
+        }
+    }
+
+    /// Page-scoped tags produce page results, including pages with no blocks.
+    public func pages(taggedWith tag: String) throws -> [BacklinkHit] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT p.name_key, p.display_name FROM page_tags t
+                JOIN pages p ON p.name_key = t.page_key
+                WHERE t.tag = ? AND p.file_exists = 1
+                ORDER BY p.journal_date DESC, p.display_name COLLATE NOCASE
+                """, arguments: [tag.lowercased()]).map { row in
+                    BacklinkHit(blockID: Self.pageHitBlockID, pageKey: row["name_key"],
+                                pageDisplayName: row["display_name"], content: "")
+                }
         }
     }
 
@@ -1212,8 +1253,8 @@ public final class CacheDB: @unchecked Sendable {
 
     /// Compiles the *page-level* reading of a query: which pages match purely by
     /// their page properties (preamble `key:: value` lines). Returns nil unless
-    /// the query is built solely from property terms (with `and`/`or`) — anything
-    /// block-specific (tags, refs, tasks, `not`) can't be decided from page
+    /// the query is built solely from property or tag terms (with `and`/`or`).
+    /// Block-specific refs, tasks, and `not` cannot be decided from page
     /// properties alone, so those queries yield block matches only.
     private static func compilePage(_ expr: QueryExpr) -> (sql: String, args: [DatabaseValueConvertible])? {
         switch expr {
@@ -1233,7 +1274,10 @@ public final class CacheDB: @unchecked Sendable {
             guard !parts.isEmpty, parts.allSatisfy({ $0 != nil }) else { return nil }
             let ps = parts.compactMap { $0 }
             return ("(" + ps.map(\.sql).joined(separator: " OR ") + ")", ps.flatMap(\.args))
-        case .not, .tag, .pageRef, .task:
+        case .tag(let tag):
+            return ("EXISTS (SELECT 1 FROM page_tags pt WHERE pt.page_key = p.name_key AND pt.tag = ?)",
+                    [tag.lowercased()])
+        case .not, .pageRef, .task:
             return nil
         }
     }
@@ -1241,11 +1285,15 @@ public final class CacheDB: @unchecked Sendable {
     /// Existing tags matching a prefix, for `#` autocomplete.
     public func tags(withPrefix prefix: String) throws -> [String] {
         try dbQueue.read { db in
-            try String.fetchAll(
-                db,
-                sql: "SELECT DISTINCT tag FROM tags WHERE tag LIKE ? ESCAPE '\\' ORDER BY tag LIMIT 50",
-                arguments: [likePrefix(prefix.lowercased())]
-            )
+            var tags = Set<String>()
+            // Limit each indexed scan before merging, even for an empty prefix.
+            for table in ["tags", "page_tags"] {
+                let matches = try String.fetchAll(db,
+                    sql: "SELECT DISTINCT tag FROM \(table) WHERE tag LIKE ? ESCAPE '\\' ORDER BY tag LIMIT 50",
+                    arguments: [likePrefix(prefix.lowercased())])
+                tags.formUnion(matches)
+            }
+            return Array(tags.sorted().prefix(50))
         }
     }
 
@@ -1439,7 +1487,7 @@ public final class CacheDB: @unchecked Sendable {
         try dbQueue.read { db in
             try String.fetchAll(
                 db,
-                sql: "SELECT DISTINCT page_key FROM tags WHERE tag = ?",
+                sql: "SELECT DISTINCT page_key FROM (SELECT page_key, tag FROM tags UNION ALL SELECT page_key, tag FROM page_tags) WHERE tag = ?",
                 arguments: [tag.lowercased()]
             )
         }

@@ -63,6 +63,8 @@ final class AppState: ObservableObject {
     /// Registered by whichever outline holds focus; a stale registration is
     /// harmless, since closing a session with no open session does nothing.
     var closePendingEdit: (() -> Void)?
+    weak var activeMetadataSession: PagePropertyEditSession?
+    var metadataDrafts: [String: PagePropertyDraft] = [:]
     weak var focusedOutline: OutlineEditorController?
 
     /// Quiet period after the last keystroke before a page is written, and the
@@ -212,6 +214,20 @@ final class AppState: ObservableObject {
         store.page(named: name)
     }
 
+    /// Applies page metadata to the latest document so concurrent block edits survive.
+    @discardableResult
+    func commitPagePreamble(_ preamble: String, for name: String, expected: String) -> Bool {
+        closePendingEdit?()
+        var doc = document(for: name)
+        guard doc.preamble == expected else { return false }
+        guard doc.preamble != preamble else { return true }
+        doc.preamble = preamble
+        commit(doc, undoLabel: L("Edit Page Properties"), numberingChanged: false)
+        closePendingEdit?()
+        dataVersion += 1
+        return true
+    }
+
     /// Commits an edited document: updates memory, schedules the save
     /// (`saveDebounce`, bounded by `saveCeiling` — SPEC §9.3), and records undo
     /// state.
@@ -343,6 +359,7 @@ final class AppState: ObservableObject {
     }
 
     func flushPendingSaves() {
+        activeMetadataSession?.saveDraft()
         flushSaveKeys(Set(dirtySaveNames.keys))
     }
 
@@ -422,8 +439,10 @@ final class AppState: ObservableObject {
     }
 
     func undo() {
+        _ = activeMetadataSession?.finish()
         closePendingEdit?()
-        guard let entry = undoStack.popLast() else { return }
+        guard let entry = undoStack.last, activeMetadataSession?.canApplyUndo(entry.before) != false else { return }
+        undoStack.removeLast()
         for doc in entry.before {
             store.updatePage(doc)
             scheduleSave(doc.name)
@@ -435,8 +454,10 @@ final class AppState: ObservableObject {
     }
 
     func redo() {
+        _ = activeMetadataSession?.finish()
         closePendingEdit?()
-        guard let entry = redoStack.popLast() else { return }
+        guard let entry = redoStack.last, activeMetadataSession?.canApplyUndo(entry.after) != false else { return }
+        redoStack.removeLast()
         for doc in entry.after {
             store.updatePage(doc)
             scheduleSave(doc.name)

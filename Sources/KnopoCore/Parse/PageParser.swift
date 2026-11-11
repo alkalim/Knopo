@@ -1,7 +1,7 @@
 import Foundation
 
 public struct ParsedPage: Sendable {
-    /// Verbatim text before the first bullet (rare; preserved untouched).
+    /// Page properties and other text before the first outline block.
     public var preamble: String
     public var blocks: [Block]
     var rootMarkers: [ClipboardMarker] = []
@@ -29,6 +29,7 @@ public enum PageParser {
         _ text: String, plainLinesAsBlocks: Bool
     ) -> ParsedPage {
         let lines = splitKeepingTerminators(text)
+        let preambleFences = plainLinesAsBlocks ? Set<Int>() : preambleFenceLines(lines)
         var preamble = ""
         var roots: [Block] = []
         var rootMarkers: [ClipboardMarker] = []
@@ -48,10 +49,20 @@ public enum PageParser {
             current = nil
         }
 
-        for line in lines {
+        for (lineIndex, line) in lines.enumerated() {
+            if preambleFences.contains(lineIndex) {
+                preamble += line
+                continue
+            }
             let leadingIndent = plainLinesAsBlocks ? clipboardIndent(line)
                 : line.prefix { $0 == " " || $0 == "\t" }.count
             var bullet = inFence ? nil : (plainLinesAsBlocks ? matchClipboardBullet(line) : matchBullet(line))
+            // Logseq also uses unindented Markdown headings as outline blocks.
+            // Heading level affects styling, not outline depth.
+            if !plainLinesAsBlocks, !inFence, leadingIndent == 0, line.first == "#",
+               case .heading = BlockKind.classify(chomp(String(line))) {
+                bullet = BulletMatch(indent: 0, text: chomp(String(line)), width: 0, marker: .plain)
+            }
             if bullet != nil, !hasList {
                 hasList = true
                 stack.removeAll()
@@ -101,7 +112,8 @@ public enum PageParser {
                 pending.appendRaw(line)
                 let stripped = stripContinuationIndent(line, contentColumn: pending.contentColumn,
                                                        expandTabs: plainLinesAsBlocks)
-                let propertySource = plainLinesAsBlocks ? stripped.trimmingCharacters(in: .whitespaces) : stripped
+                let propertySource = plainLinesAsBlocks || pending.marker == .plain
+                    ? stripped.trimmingCharacters(in: .whitespaces) : stripped
                 if inFence {
                     pending.appendContentLine(stripped)
                     if fenceToggles(stripped) { inFence = false }
@@ -195,6 +207,33 @@ public enum PageParser {
     }
 
     // MARK: - Line helpers
+
+    /// Only closed fences protect preamble examples. Without a closing fence,
+    /// later outline blocks remain editable. Closed examples may contain bullets and headings.
+    static func preambleFenceLines(_ lines: [Substring]) -> Set<Int> {
+        var protected = Set<Int>()
+        var opening: (index: Int, marker: Character, count: Int, indent: Int)?
+        for (index, line) in lines.enumerated() {
+            let text = chomp(String(line)).trimmingCharacters(in: .whitespaces)
+            let indent = line.prefix { $0 == " " || $0 == "\t" }.count
+            if let start = opening {
+                let run = text.prefix { $0 == start.marker }
+                if indent <= start.indent, run.count >= start.count,
+                   text.dropFirst(run.count).trimmingCharacters(in: .whitespaces).isEmpty {
+                    protected.formUnion(start.index...index)
+                    opening = nil
+                }
+            } else {
+                if matchBullet(line) != nil { break }
+                if line.first == "#", case .heading = BlockKind.classify(chomp(String(line))) { break }
+                if let marker = text.first, marker == "`" || marker == "~" {
+                    let count = text.prefix { $0 == marker }.count
+                    if count >= 3 { opening = (index, marker, count, indent) }
+                }
+            }
+        }
+        return protected
+    }
 
     /// Splits text into lines, each retaining its terminator, so concatenating
     /// all lines reproduces the input exactly.

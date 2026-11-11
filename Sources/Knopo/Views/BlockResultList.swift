@@ -20,18 +20,19 @@ struct BlockResultList: View {
         // Lazy so a long list only renders the rows in view.
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(Array(groups.enumerated()), id: \.element.key) { index, group in
-                groupHeader(group.key)
+                let blockHits = group.value.filter { !$0.isPageResult }
+                groupHeader(group.key, hasBlocks: !blockHits.isEmpty)
                     .padding(.top, index == 0 ? 0 : 10 * BlockRenderer.zoom)
                     .padding(.bottom, 2)
                 VStack(alignment: .leading, spacing: 0) {
-                    if !collapsedGroups.contains(group.key) {
+                    if !blockHits.isEmpty, !collapsedGroups.contains(group.key) {
                         // One query per visible group. The rows need each other's
                         // ancestors to nest and to share breadcrumbs.
                         let ancestors = (try? app.store.cache.breadcrumbs(
-                            ofBlocks: group.value.map(\.blockID))) ?? [:]
+                            ofBlocks: blockHits.map(\.blockID))) ?? [:]
                         let numbering = SourceNumbering(app: app, page: group.key)
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(ResultRowLayout.layout(group.value, ancestors: ancestors,
+                            ForEach(ResultRowLayout.layout(blockHits, ancestors: ancestors,
                                                            markers: numbering.markers, widths: numbering.widths),
                                     id: \.hit.blockID) { row in
                                 ResultRow(row: row, editable: editable)
@@ -48,17 +49,21 @@ struct BlockResultList: View {
     }
 
     /// The chevron collapses the group. The name opens the page, like any page link.
-    private func groupHeader(_ sourcePage: String) -> some View {
+    private func groupHeader(_ sourcePage: String, hasBlocks: Bool) -> some View {
         HStack(spacing: 4 * BlockRenderer.zoom) {
-            Button {
-                withAnimation(app.preferences.animationsEnabled ? .easeOut(duration: 0.16) : nil) {
-                    if collapsedGroups.contains(sourcePage) { collapsedGroups.remove(sourcePage) }
-                    else { collapsedGroups.insert(sourcePage) }
+            if hasBlocks {
+                Button {
+                    withAnimation(app.preferences.animationsEnabled ? .easeOut(duration: 0.16) : nil) {
+                        if collapsedGroups.contains(sourcePage) { collapsedGroups.remove(sourcePage) }
+                        else { collapsedGroups.insert(sourcePage) }
+                    }
+                } label: {
+                    ResultChevron(expanded: !collapsedGroups.contains(sourcePage))
                 }
-            } label: {
-                ResultChevron(expanded: !collapsedGroups.contains(sourcePage))
+                .buttonStyle(.plain)
+            } else {
+                Color.clear.frame(width: 14 * BlockRenderer.zoom, height: 14 * BlockRenderer.zoom)
             }
-            .buttonStyle(.plain)
             Button {
                 let target = NavTarget.page(name: sourcePage)
                 wantsSidebarClick() ? nav.openInRightSidebar(target) : nav.navigate(to: target)
@@ -361,6 +366,9 @@ struct ResultBlockText: NSViewRepresentable {
     /// Nil turns image resize handles off. Without it a handle would do nothing.
     var onImageResize: ((_ imageIndex: Int, _ width: CGFloat) -> Void)?
     var hoverHint: String? = nil
+    var fitsContent = false
+    var verticalInset = OutlineRowCell.contentInsetV
+    var allowsTextSelection = false
     /// A click on plain text: its click count, and whether Cmd or Shift asks
     /// for the sidebar.
     var onClick: ((_ clickCount: Int, _ sidebar: Bool) -> Void)?
@@ -379,6 +387,8 @@ struct ResultBlockText: NSViewRepresentable {
         view.allowsImageResize = onImageResize != nil
         view.onImageResize = onImageResize ?? { _, _ in }
         view.hoverHint = hoverHint
+        view.allowsTextSelection = allowsTextSelection
+        view.textContainerInset.height = verticalInset
         view.setAccessibilityHelp(hoverHint)
         let onClick = onClick
         view.onFocusRequest = { _ in onClick?(NSApp?.currentEvent?.clickCount ?? 1, false) }
@@ -394,10 +404,12 @@ struct ResultBlockText: NSViewRepresentable {
     func sizeThatFits(
         _ proposal: ProposedViewSize, nsView: RenderedTextView, context: Context
     ) -> CGSize? {
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 400
+        let availableWidth = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 400
+        let width = fitsContent ? min(availableWidth, ceil(text.size().width)) : availableWidth
         // The outline's row height without the gap between rows.
         let height = OutlineRowCell.height(for: text, contentWidth: width)
             - 2 * OutlineRowCell.verticalPadding
+            - 2 * (OutlineRowCell.contentInsetV - verticalInset)
         return CGSize(width: width, height: height)
     }
 }

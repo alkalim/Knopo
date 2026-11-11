@@ -12,6 +12,7 @@ struct RightSidebar: View {
     private static let cardInset: CGFloat = 10
     private enum ScrollAnchor: Hashable { case top }
     @State private var scrollerStyle = NSScroller.preferredScrollerStyle
+    @State private var propertyRequests: [String: UUID] = [:]
 
     var body: some View {
         columnSurface
@@ -187,6 +188,10 @@ struct RightSidebar: View {
             app.toggleFavourite(name)
         }
         Button("Open in Main View") { nav.navigate(to: .page(name: name)) }
+        Button("Add Page Property") {
+            nav.openInRightSidebar(.page(name: name))
+            propertyRequests[PageName.key(name)] = UUID()
+        }
         Button("Reveal in Finder") { PageActions.revealInFinder(name, app: app) }
             .disabled(PageActions.file(of: name, app: app) == nil)
         Divider()
@@ -214,7 +219,9 @@ struct RightSidebar: View {
         case .page(let name, let zoom):
             // Page panes size to content (no inner ScrollView), so the whole
             // pane stack scrolls together — no nested/double scrolling.
-            PageScreen(pageName: name, zoom: zoom, inPane: true, initialOutlineWidth: outlineWidth)
+            PageScreen(pageName: name, zoom: zoom, inPane: true, initialOutlineWidth: outlineWidth,
+                       addPropertyRequest: propertyRequests[PageName.key(name)],
+                       onPropertyRequestHandled: { propertyRequests[PageName.key(name)] = nil })
         case .journalHome:
             // The navigator opens the journal home as today's page, so a pane
             // never holds this target. Show today's page if one does.

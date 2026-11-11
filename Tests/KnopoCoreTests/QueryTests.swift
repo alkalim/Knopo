@@ -170,6 +170,29 @@ import Foundation
         expectEqual(try run(store, "status:: pending").total, 0)                      // neither
     }
 
+    @Test func editedLogseqPagePropertiesStayPageScopedAfterSaving() throws {
+        let store = try makeGraph([
+            "Alpha": "status:: open\n# Heading\nstatus:: closed\n- body\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: store.root) }
+        var doc = store.page(named: "Alpha")
+        expectTrue(doc.setPreambleProperty(at: 0, to: BlockProperty(key: "status", value: "pending")))
+        store.updatePage(doc)
+        try store.savePage(named: "Alpha")
+        expectEqual(try run(store, "status:: open").total, 0)
+        let pending = try run(store, "status:: pending")
+        expectEqual(pending.hits.map(\.pageDisplayName), ["Alpha"])
+        expectTrue(pending.hits.first?.content.isEmpty == true)
+        expectEqual(try run(store, "status:: closed").hits.map(\.content), ["# Heading"])
+        expectEqual(try String(contentsOf: store.fileURL(forPageNamed: "Alpha"), encoding: .utf8),
+                    "status:: pending\n# Heading\nstatus:: closed\n- body\n")
+        expectTrue(doc.setPreambleProperty(at: 0, to: nil))
+        store.updatePage(doc)
+        try store.savePage(named: "Alpha")
+        expectEqual(try run(store, "status:: pending").total, 0)
+        expectEqual(try run(store, "status:: closed").hits.map(\.content), ["# Heading"])
+    }
+
     @Test func notAndOr() throws {
         let store = try graph()
         // #work but not done → both work blocks are TODO/none, so 2.

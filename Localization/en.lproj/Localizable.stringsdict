@@ -11,6 +11,23 @@
 -->
 <plist version="1.0">
 <dict>
+    <!-- Tag view header: how many pages carry this tag. -->
+    <key>%lld pages</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@count@</string>
+        <key>count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>lld</string>
+            <key>one</key>
+            <string>%lld page</string>
+            <key>other</key>
+            <string>%lld pages</string>
+        </dict>
+    </dict>
     <!-- Tag view header: how many blocks carry this tag. -->
     <key>%lld blocks</key>
     <dict>

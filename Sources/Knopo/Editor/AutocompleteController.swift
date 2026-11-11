@@ -35,6 +35,9 @@ final class AutocompleteController: NSObject {
         case commandProperty(label: String, hint: String)
     }
 
+    /// Page metadata permits tag completion without block-only slash commands.
+    var pagePropertyEditing = false
+
     // Data providers, injected by the outline controller.
     var fetchPages: (String) -> [String] = { _ in [] }
     var fetchBlocks: (String) -> [SearchHit] = { _ in [] }
@@ -90,22 +93,53 @@ final class AutocompleteController: NSObject {
             return
         }
         guard selection.length == 0,
-              let trigger = Self.detectTrigger(
-                  in: textView.string as NSString, caret: selection.location
-              ) else {
+              let trigger = pagePropertyEditing
+                  ? Self.pageTagTrigger(in: textView.string as NSString, caret: selection.location)
+                  : Self.detectTrigger(in: textView.string as NSString, caret: selection.location) else {
             dismiss()
             return
         }
         mode = trigger.mode
         triggerLocation = trigger.location
+        if pagePropertyEditing, trigger.query.trimmingCharacters(in: .whitespaces).isEmpty {
+            dismiss()
+            return
+        }
         rebuildItems(query: trigger.query)
         if items.isEmpty {
             dismiss()
         } else {
             presentPanel(anchoredTo: textView)
             tableView.reloadData()
-            select(0)
+            if pagePropertyEditing {
+                selectedIndex = -1
+                tableView.deselectAll(nil)
+            } else {
+                select(0)
+            }
         }
+    }
+
+    private static func pageTagTrigger(in text: NSString, caret: Int) -> Trigger? {
+        let separator = text.range(of: "::")
+        guard separator.location != NSNotFound, caret >= NSMaxRange(separator),
+              text.substring(to: separator.location).trimmingCharacters(in: .whitespaces).lowercased() == "tags"
+        else { return nil }
+        let start = NSMaxRange(separator)
+        let prefix = text.substring(with: NSRange(location: start, length: caret - start)) as NSString
+        if let bracket = InlineReferenceEditing.trigger(open: "[[", close: "]]", in: text, caret: caret) {
+            let location = bracket.location > start && text.character(at: bracket.location - 1) == 0x23
+                ? bracket.location - 1 : bracket.location
+            return Trigger(mode: .tag, location: location, query: bracket.query)
+        }
+        if let tag = wordTrigger(0x23, mode: .tag, in: text, caret: caret) { return tag }
+        let comma = prefix.range(of: ",", options: .backwards)
+        let offset = comma.location == NSNotFound ? 0 : NSMaxRange(comma)
+        let fragment = prefix.substring(from: offset)
+        guard !fragment.contains("["), !fragment.contains("]"), !fragment.contains("#") else { return nil }
+        let leading = fragment.prefix(while: { $0.isWhitespace }).utf16.count
+        return Trigger(mode: .tag, location: start + offset + leading,
+                       query: fragment.trimmingCharacters(in: .whitespaces))
     }
 
     private static func detectTrigger(in text: NSString, caret: Int) -> Trigger? {
@@ -274,12 +308,19 @@ final class AutocompleteController: NSObject {
     /// Returns true when the event was consumed by the popup.
     func handleKeyDown(_ event: NSEvent) -> Bool {
         guard isActive else { return false }
+        // Metadata Enter commits the typed value unless a suggestion was chosen.
+        // Tab always leaves completion to move between property rows.
+        if pagePropertyEditing,
+           event.keyCode == 48 || ([36, 76].contains(event.keyCode) && selectedIndex < 0) {
+            dismiss()
+            return false
+        }
         switch event.keyCode {
         case 125: // Down
             select(selectedIndex + 1)
             return true
         case 126: // Up
-            select(selectedIndex - 1)
+            select(selectedIndex < 0 ? items.count - 1 : selectedIndex - 1)
             return true
         case 36, 76, 48: // Return / keypad Enter / Tab
             commitSelected()
@@ -360,6 +401,25 @@ final class AutocompleteController: NSObject {
             case .commandImage: onImageCommand()
             default: onLinkCommand()
             }
+            return
+        }
+        if pagePropertyEditing, case .tag(let name) = item {
+            let source = textView.string as NSString
+            let caret = textView.selectedRange().location
+            guard triggerLocation <= caret, caret <= source.length else { dismiss(); return }
+            let prefix = source.substring(with: NSRange(location: triggerLocation, length: caret - triggerLocation))
+            let hash = prefix.hasPrefix("#") ? "#" : ""
+            let bracket = prefix.contains("[[") || name.contains(where: { $0.isWhitespace })
+            var spelling = bracket ? "\(hash)[[\(name)]]" : hash + name
+            let valueStart = NSMaxRange(source.range(of: "::"))
+            if triggerLocation == valueStart { spelling = " " + spelling }
+            let token = PageTagValue.tokens(in: source.substring(from: valueStart)).first {
+                $0.range.location + valueStart == triggerLocation
+            }
+            let end = max(caret, token.map { NSMaxRange($0.range) + valueStart } ?? caret)
+            dismiss()
+            suppressNextChange = true
+            textView.insertText(spelling, replacementRange: NSRange(location: triggerLocation, length: end - triggerLocation))
             return
         }
         let caret = textView.selectedRange().location

@@ -73,4 +73,23 @@ import Foundation
         try cache.indexPage(journal("2026-06-10", ["   ", "real"]), stamp: nil)
         expectEqual(try cache.journalDaysWithContent(), ["2026-06-10"])
     }
+
+    @Test func pagePropertiesKeepJournalInFeed() throws {
+        let cache = try CacheDB()
+        var day = journal("2026-06-10", [""])
+        try cache.indexPage(day, stamp: nil)
+        let empty = try cache.journalDaySignature()
+        day.preamble = "mood:: good\n"
+        try cache.indexPage(day, stamp: nil)
+        expectEqual(try cache.journalDaysWithContent(), [day.name])
+        let withProperties = try cache.journalDaySignature()
+        expectTrue(withProperties != empty)
+        day.preamble = "mood:: great\n"
+        try cache.indexPage(day, stamp: nil)
+        expectEqual(try cache.journalDaySignature(), withProperties)
+        day.preamble = ""
+        try cache.indexPage(day, stamp: nil)
+        expectTrue(try cache.journalDaysWithContent().isEmpty)
+        expectEqual(try cache.journalDaySignature(), empty)
+    }
 }

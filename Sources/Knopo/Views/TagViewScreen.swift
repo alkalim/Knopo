@@ -18,7 +18,8 @@ struct TagViewScreen: View {
     var body: some View {
         let _ = app.dataVersion
         let hits = (try? app.store.cache.blocks(taggedWith: tag)) ?? []
-        let groups = PageGroupOrder.sorted(Dictionary(grouping: hits, by: \.pageDisplayName))
+        let pages = (try? app.store.cache.pages(taggedWith: tag)) ?? []
+        let groups = PageGroupOrder.sorted(Dictionary(grouping: pages + hits, by: \.pageDisplayName))
 
         let content = VStack(alignment: .leading, spacing: 12 * BlockRenderer.zoom) {
             if !inPane {
@@ -27,9 +28,16 @@ struct TagViewScreen: View {
                         Text(verbatim: "#\(tag)")   // the tag is data, not a key
                             .font(.system(size: BlockRenderer.pageTitleFontSize, weight: .bold))
                             .foregroundStyle(.purple)
-                        Text("\(hits.count) blocks")   // pluralized in Localization/en.lproj
-                            .font(.system(size: BlockRenderer.baseFontSize))
-                            .foregroundStyle(.secondary)
+                        if !pages.isEmpty {
+                            Text("\(pages.count) pages")
+                                .font(.system(size: BlockRenderer.baseFontSize))
+                                .foregroundStyle(.secondary)
+                        }
+                        if !hits.isEmpty || pages.isEmpty {
+                            Text("\(hits.count) blocks")
+                                .font(.system(size: BlockRenderer.baseFontSize))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     ActionsMenu {

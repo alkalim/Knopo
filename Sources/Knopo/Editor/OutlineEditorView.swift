@@ -24,11 +24,12 @@ struct OutlineEditorView: View {
     var initialWidth: CGFloat? = nil
     /// Feed outlines can coexist with an incoming day page during navigation.
     var inJournalFeed = false
+    var pagePropertySession: PagePropertyEditSession?
 
     var body: some View {
         OutlineEditorRepresentable(
             app: app, nav: nav, pageName: pageName, zoom: zoom,
-            inPane: inPane, inJournalFeed: inJournalFeed, initialWidth: initialWidth, dataVersion: app.dataVersion,
+            inPane: inPane, inJournalFeed: inJournalFeed, pagePropertySession: pagePropertySession, initialWidth: initialWidth, dataVersion: app.dataVersion,
             // Reading these here makes the view (and updateNSView) react to find.
             findActive: nav.findActive, findQuery: nav.findQuery,
             findStepToken: nav.findStepToken, findForward: nav.findStepForward,
@@ -47,6 +48,7 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
     let zoom: UUID?
     let inPane: Bool
     let inJournalFeed: Bool
+    let pagePropertySession: PagePropertyEditSession?
     let initialWidth: CGFloat?
     /// @Published on AppState; bumps on external/index changes so
     /// `updateNSView` runs and the controller can diff and reload.
@@ -68,6 +70,8 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
         let container = OutlineContainerView(tableView: controller.tableView)
         controller.inPane = inPane
         controller.inJournalFeed = inJournalFeed
+        controller.pagePropertySession = pagePropertySession
+        pagePropertySession?.outline = controller
         controller.applyPaneRole()
         context.coordinator.controller = controller
         context.coordinator.find = nav.find
@@ -90,6 +94,8 @@ private struct OutlineEditorRepresentable: NSViewRepresentable {
 
     func updateNSView(_ nsView: OutlineContainerView, context: Context) {
         guard let controller = context.coordinator.controller else { return }
+        controller.pagePropertySession = pagePropertySession
+        pagePropertySession?.outline = controller
         // Width changes use the table's layout path. Do not refresh queries
         // and embeds on every resize frame unless the data also changed.
         let refreshContent = controller.initialLayoutWidth == initialWidth
@@ -620,6 +626,7 @@ final class OutlineEditorController: NSObject {
         var current: OutlineEditorSnapshot
     }
     private var editSession: EditSession?
+    weak var pagePropertySession: PagePropertyEditSession?
 
     private func currentOutlineEditorSnapshot() -> OutlineEditorSnapshot? {
         guard var state = editSession?.current, state.id == focusedBlockID else { return nil }
@@ -1006,6 +1013,8 @@ final class OutlineEditorController: NSObject {
     /// (`editorFocusLost`).
     private var mayTakeFocus: Bool {
         guard !inPane else { return false }
+        guard !inJournalFeed || JournalDate(pageName: pageName)?.pageName == JournalDate.today().pageName else { return false }
+        if tableView.window?.firstResponder is PagePropertyTextView { return false }
         if let focused = tableView.window?.firstResponder as? BlockEditorTextView,
            !focused.isInPane {
             return false
@@ -1817,12 +1826,10 @@ final class OutlineEditorController: NSObject {
             out.append(NSAttributedString(string: "\(prop.key): ", attributes: keyAttrs))
             out.append(NSAttributedString(string: prop.value, attributes: valueAttrs))
         }
-        // Pin the appended property lines to the block's line height (so
-        // focused/unfocused heights stay equal — same lines, same metrics). Only
-        // those lines: the body was pinned by the renderer, which gives a table's
-        // rows their own taller metrics.
+        // Property lines use body metrics in both rendered and focused views.
+        // Leave the content's heading and table metrics intact.
         BlockRenderer.pinLineHeight(
-            out, BlockRenderer.lineHeight(forSource: block.content),
+            out, BlockRenderer.lineHeight(forSource: ""),
             range: NSRange(location: bodyLength, length: out.length - bodyLength))
         return out
     }
@@ -2175,6 +2182,49 @@ final class OutlineEditorController: NSObject {
         }
     }
 
+    /// A blank metadata line hands writing back to the page's first block.
+    func focusAfterPageProperties() {
+        guard zoom == nil else { return }
+        let id = app.document(for: pageName).blocks.first?.id ?? materialiseFirstBlock()
+        reloadAndFocus(id, selection: NSRange(location: 0, length: 0))
+    }
+
+    private var canBeginPageProperties: Bool {
+        guard zoom == nil, pagePropertySession != nil,
+              let session = editSession, let id = focusedBlockID,
+              let original = session.before.blocks.first, original.id == id,
+              original.content.isEmpty, original.properties.isEmpty, original.children.isEmpty,
+              session.initial.text.isEmpty,
+              app.document(for: pageName).blocks.first?.id == id else { return false }
+        return true
+    }
+
+    /// Completing a property in an initially empty first block starts page metadata.
+    private func promoteFirstPropertyLine() -> Bool {
+        guard canBeginPageProperties, let metadata = pagePropertySession,
+              let session = editSession, let original = session.before.blocks.first,
+              !editor.string.contains(where: { $0.isNewline }),
+              let property = PageParser.matchProperty(editor.string),
+              PageDocument.isValidPreambleProperty(property),
+              app.activeMetadataSession?.finish() != false else { return false }
+        var document = app.document(for: pageName)
+        // Keep the empty block's identity for references and for the body that follows.
+        document.blocks[0] = original
+        let before = document
+        let index = document.preambleProperties.count
+        guard document.insertPreambleProperty(property, at: index) else { return false }
+        let state = OutlineEditorSnapshot(block: original, selection: NSRange(location: 0, length: 0))
+        app.commit(document, undoLabel: L("Edit Page Properties"), before: before,
+                   editor: undoEditing(before: session.initial, after: state), numberingChanged: false)
+        // The property and its typing are one undo step, not a transient block-property edit.
+        editSession = nil
+        endEditing()
+        reloadAndFocus(nil, selection: nil)
+        app.dataVersion += 1
+        metadata.begin(app: app, pageName: pageName, index: index + 1, inserting: true)
+        return true
+    }
+
     private func attachEditor(to id: UUID, selection: NSRange?, startSession: Bool) {
         guard let index = rows.firstIndex(where: { $0.block.id == id }) else { return }
         let block = rows[index].block
@@ -2196,6 +2246,7 @@ final class OutlineEditorController: NSObject {
         editor.emptyHint = rows.count == 1 ? BlockRenderer.emptyBlockHint : nil
         // Edit the full source — content plus user `key:: value` lines (§3.2).
         editor.setContent(editSession?.current.text ?? block.editableSource)
+        autocomplete.pagePropertyEditing = canBeginPageProperties && editor.string.lowercased().hasPrefix("tags::")
         guard let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: true)
             as? OutlineRowCell else { return }
         cell.embedEditor(editor)
@@ -2920,10 +2971,17 @@ final class OutlineEditorController: NSObject {
         return out
     }
 
-    /// A tag's blocks come from any page, so each line names its own.
+    /// Page tags show page names; block tags also show their matching content.
     func previewAttributedString(forTag tag: String) -> NSAttributedString? {
-        let hits = (try? app.store.cache.blocks(taggedWith: tag))?.prefix(10) ?? []
+        let pages = Array(((try? app.store.cache.pages(taggedWith: tag)) ?? []).prefix(10))
+        let hits = (try? app.store.cache.blocks(taggedWith: tag))?.prefix(10 - pages.count) ?? []
         let out = NSMutableAttributedString()
+        for page in pages {
+            if out.length > 0 { out.append(NSAttributedString(string: "\n")) }
+            out.append(NSAttributedString(string: app.displayTitle(for: page.pageDisplayName), attributes: [
+                .font: BlockEditorTextView.editorFont, .foregroundColor: NSColor.secondaryLabelColor,
+            ]))
+        }
         var sources: [String: SourceNumbering] = [:]
         for hit in hits {
             if sources[hit.pageDisplayName] == nil {
@@ -3634,6 +3692,7 @@ extension OutlineEditorController: BlockEditorActions {
               let index = rows.firstIndex(where: { $0.block.id == id }) else { return }
         var doc = app.document(for: pageName)
         guard let path = doc.blocks.path(to: id) else { return }
+        autocomplete.pagePropertyEditing = canBeginPageProperties && text.lowercased().hasPrefix("tags::")
         // The editor text is the block's full source — re-split into content
         // and user properties (§3.2), preserving id/collapsed.
         let wasNumbered = rows[index].block.isNumbered
@@ -3663,6 +3722,7 @@ extension OutlineEditorController: BlockEditorActions {
     }
 
     func editorSplit(atUTF16Offset offset: Int) {
+        if offset == editor.string.utf16.count, promoteFirstPropertyLine() { return }
         guard let id = focusedBlockID else { return }
         var doc = app.document(for: pageName)
         guard let path = doc.blocks.path(to: id),

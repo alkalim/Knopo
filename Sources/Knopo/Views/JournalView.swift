@@ -32,6 +32,7 @@ struct JournalDaySection: View {
     @EnvironmentObject var nav: Navigator
     let day: String
     let outlineWidth: CGFloat
+    @StateObject private var propertySession = PagePropertyEditSession()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -52,7 +53,11 @@ struct JournalDaySection: View {
                 }
                 Spacer()
             }
-            OutlineEditorView(pageName: day, initialWidth: outlineWidth, inJournalFeed: true)
+            VStack(alignment: .leading, spacing: 0) {
+                PageMetadataView(pageName: day, session: propertySession, addRequest: nil)
+                OutlineEditorView(pageName: day, initialWidth: outlineWidth, inJournalFeed: true,
+                                  pagePropertySession: propertySession)
+            }
         }
     }
 }

@@ -127,7 +127,7 @@ and the move stays within the current zoom; otherwise it removes numbering in
 place.
 
 Pasting a Markdown numbered list creates numbered blocks. Knopo also recognizes
-Logseq's `logseq.order-list-type:: number` property. It stores new numbering as
+the `logseq.order-list-type:: number` property. It stores new numbering as
 `knopo.list-type:: ordered` on ordinary Markdown bullet blocks, with the property
 hidden during editing. A `1.` prefix already stored in a block's body remains
 literal text.
@@ -352,7 +352,7 @@ commits your changes. Right-click **Journal** in the sidebar and
 choose **Jump to Day…** to navigate to another date. Slash commands such as
 `/today`, `/tomorrow`, `/yesterday`, and `/date` insert date references.
 
-Knopo also recognizes Logseq journal filenames that use underscores, such as
+Knopo also recognizes journal filenames that use underscores, such as
 `2026_07_21.md`, as the same calendar identity as `2026-07-21`.
 
 ## Search, find, and navigation
@@ -392,8 +392,21 @@ Deleting or undoing the block does not delete the imported asset file.
 
 Pages are Markdown bullet lists; two-space indentation stores the outline tree.
 Knopo preserves untouched source byte-for-byte, including Markdown it does not
-interpret. Content before the first bullet is preserved and displayed read-only
-as a page preamble; edit the file directly to change that preamble.
+interpret. Headings without a leading dash (`-`) are editable outline blocks.
+They keep their original source until edited, then save as `- # Heading`.
+
+Click page metadata to edit it directly above the outline. Tags use the same
+chips and autocomplete as block tags; clicking a chip opens its tag view.
+Start an empty first block with `tags:: project` or another `name:: value` line
+and press Enter to create page metadata. Keep pressing Enter to add property
+lines; Enter on a blank line moves into the outline. Enter while editing an
+existing property inserts another line below it. Properties entered beneath a
+block's ordinary content stay on that block. The page menu's **Add Page Property**
+is an optional shortcut; a property's context menu can remove it. Each completed
+edit can be undone. No form or separate edit-button row is needed.
+Page tags appear as page results, without applying to every block. Properties stay
+above the outline in the file, separate from block properties. Other preamble text
+remains read-only.
 
 Knopo watches the graph for external file edits and refreshes its index. If an
 external edit conflicts with unsaved in-app changes, the last writer wins and

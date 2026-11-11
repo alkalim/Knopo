@@ -59,6 +59,60 @@ import KnopoCore
             + view.subviews.flatMap { descendants($0, of: type) }
     }
 
+    @Test(arguments: [false, true])
+    func pastMetadataOnlyDayDoesNotTakeFocus(hasBlankBlock: Bool) async throws {
+        let rig = try rig(todayBlocks: 1)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        let day = JournalDate.today().adding(days: -10).pageName
+        var document = rig.app.document(for: day)
+        document.blocks = hasBlankBlock ? [Block(content: "")] : []
+        document.preamble = "mood:: good\n"
+        rig.app.store.updatePage(document)
+        try rig.app.store.savePage(named: day)
+        rig.app.dataVersion += 1
+        let feed = try #require(rig.scroll.documentView as? JournalTableView)
+        let coordinator = try #require(feed.delegate as? JournalScrollView.Coordinator)
+        #expect(rig.window.makeFirstResponder(feed))
+        feed.scrollRowToVisible(try #require(coordinator.days.firstIndex(of: day)) + 1)
+        try await rig.settle()
+        #expect(!(rig.window.firstResponder is BlockEditorTextView))
+        #expect(!(rig.window.firstResponder is PagePropertyTextView))
+        let outline = try #require(descendants(rig.host, of: OutlineTableView.self).first {
+            ($0.delegate as? OutlineEditorController)?.pageName == day
+        })
+        #expect(outline.numberOfRows == 1)
+    }
+
+    @Test func firstJournalPropertyUsesInlineMetadata() async throws {
+        let rig = try rig(todayBlocks: 0)
+        defer { rig.app.shutdown(); rig.window.contentView = nil }
+        try await rig.settle()
+        let day = JournalDate.today().pageName
+        let editor = try #require(rig.window.firstResponder as? BlockEditorTextView)
+        editor.insertText("mood:: good", replacementRange: editor.selectedRange())
+        let enter = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: rig.window.windowNumber, context: nil,
+            characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+        editor.keyDown(with: enter)
+        try await rig.settle()
+        #expect(rig.app.document(for: day).preamble == "mood:: good\n")
+        let metadata = try #require(rig.window.firstResponder as? PagePropertyTextView)
+        #expect(metadata.string.isEmpty)
+        metadata.insertText("tags:: journal", replacementRange: metadata.selectedRange())
+        metadata.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        try await rig.settle()
+        let blank = try #require(rig.window.firstResponder as? PagePropertyTextView)
+        #expect(blank.string.isEmpty)
+        blank.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        try await rig.settle()
+        #expect(rig.window.firstResponder is BlockEditorTextView)
+        #expect(rig.app.document(for: day).preamble == "mood:: good\ntags:: journal\n")
+        rig.app.flushPendingSaves()
+        let saved = try String(contentsOf: rig.app.store.fileURL(forPageNamed: day), encoding: .utf8)
+        #expect(saved.hasPrefix("mood:: good\ntags:: journal\n"))
+    }
+
     /// Which page's outline an editor sits in, via its table's controller.
     private func outlinePage(of editor: NSView) -> String? {
         var view: NSView? = editor

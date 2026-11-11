@@ -76,6 +76,14 @@ import KnopoCore
             == ("### A Title here" as NSString).range(of: "Title").location)
     }
 
+    @Test func headingContinuationKeepsSourceOffsets() throws {
+        let content = "# A **heading** 👩🏽‍💻\nBody with **bold** text and `code`"
+        for word in ["Body", "bold", "code"] {
+            #expect(try mappedOffset(of: word, in: content)
+                == (content as NSString).range(of: word).location)
+        }
+    }
+
     /// A tag renders with its `#`, and a click inside it maps to the token.
     @Test func tagMapsToItsTokenStart() throws {
         let content = "tagged #boat here"

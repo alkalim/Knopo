@@ -16,9 +16,11 @@ Medium	Body font weight
 %lld blocks
 %lld blocks are referenced in %lld places. Delete anyway?	Delete-block confirmation; both counts are pluralized
 %lld of %lld	Find bar: which match of how many is selected
+%lld pages
 A page named “%@” already exists	Error alert; the placeholder is the page name
 Abbreviated	Journal date format: shortened month name, Jun 10, 2026
 Actual Size
+Add Page Property
 Add to Favourites
 All Pages	Sidebar section and window title: the page list
 Animations
@@ -54,6 +56,8 @@ Delete “%@”?	Confirmation title; the placeholder is the page name
 Delete…
 Done
 Double-click to edit here. Click the bullet or number to open this block.
+Edit Page Properties
+Edit Property
 Enter a date format.	Custom journal date pattern: the field is blank
 Enter a new name for #%@.	Rename-tag prompt; placeholder is the tag name
 Enter a new name for “%@”.	Rename-page prompt; placeholder is the page name
@@ -113,6 +117,7 @@ Open in Main View
 Open in Sidebar
 Open this block. ⌘-click or Shift-click to open in the right sidebar.
 Orange	Block background color
+Page Property
 Page name
 Paste
 Pink	Block background color
@@ -126,6 +131,8 @@ Rebuilding…
 Recents
 Red	Block background color
 Redo
+Reload Property
+Remove Property
 Remove from Favourites
 Rename
 Rename Page
@@ -152,6 +159,7 @@ The index is rebuilt from the Markdown files. Recent pages are preserved.
 The only supported placeholder is {ordinal}.	Custom journal date pattern. {ordinal} is literal syntax - do not translate it
 Theme
 This date format produces no text.	Custom journal date pattern: valid syntax, but renders nothing
+This property changed elsewhere. Reload it before editing.	Inline page property edit conflict
 Today
 Today's Journal
 Toggle Sidebar
@@ -163,6 +171,7 @@ Unfavourite
 Unicode date pattern
 Unknown error
 Unlinked References
+Use name:: value on one line.	Invalid inline page property source
 Use {ordinal} at most once.	Custom journal date pattern. {ordinal} is literal syntax - do not translate it
 Use “/” for namespaces, e.g. Projects/Outliner
 Uses Unicode date patterns. Add {ordinal} immediately after d for an ordinal day, where the language has one.	Help under the custom journal date field. {ordinal} and d are literal syntax - do not translate them. The surrounding explanation should be translated
@@ -187,6 +196,7 @@ stub
 [Localizable:plurals]
 %lld blocks
 %lld blocks are referenced in %lld places. Delete anyway?
+%lld pages
 Copy %lld Blocks
 Delete %lld Blocks
 The file moves to the Trash. Links to this page become stubs. %lld block references into this page will break.
