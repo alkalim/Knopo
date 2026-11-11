@@ -3,6 +3,36 @@ import Foundation
 @testable import KnopoCore
 
 @Suite struct LogseqPageTests {
+    @Test(arguments: ["\n", "\r\n", "\r"], [false, true])
+    func pageTitlePrecedesFirstBlockTitleWithoutChangingSource(newline: String, journal: Bool) {
+        let name = journal ? "2026-06-10" : "Original"
+        let fallback = journal ? "Jun 10th, 2026" : name
+        let cases: [(String, String)] = [
+            ("title:: Page title\n", "Page title"),
+            ("title::  Page title \n", " Page title "),
+            ("title:: Page title\n- Body\n  title:: Block title\n", "Page title"),
+            ("- title:: Block title\n", "Block title"),
+            ("- Body\n  title:: Block title\n", "Block title"),
+            ("title::\n- Body\n  title:: Block title\n", "Block title"),
+            ("title::   \n- Body\n  title:: Block title\n", "Block title"),
+            ("```\ntitle:: Example\n```\n- Body\n  title:: Block title\n", "Block title"),
+            ("title::\n- Body\n", fallback),
+            ("title::   \n", fallback),
+            ("- First\n- Second\n  title:: Later block\n", fallback),
+        ]
+        for (source, expected) in cases {
+            let source = source.replacingOccurrences(of: "\n", with: newline)
+            let parsed = PageParser.parse(source)
+            let document = PageDocument(name: name, blocks: parsed.blocks,
+                                        preamble: parsed.preamble, isJournal: journal)
+            expectEqual(document.displayTitle(using: JournalDateFormat(rawValue: "MMM d{ordinal}, yyyy"),
+                                              locale: Locale(identifier: "en_US")), expected)
+            expectEqual(document.name, name)
+            expectEqual(document.nameKey, PageName.key(name))
+            expectEqual(PageSerializer.serialize(preamble: document.preamble, blocks: document.blocks), source)
+        }
+    }
+
     @Test(arguments: ["\n", "\r\n", "\r"])
     func headingsKeepSourceAndOutlineStructure(newline: String) throws {
         let text = ["tags:: project", "", "# First [[Target]]", "paragraph", "  - child",

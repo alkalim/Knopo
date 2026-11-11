@@ -111,10 +111,14 @@ public struct PageDocument: Identifiable, Sendable {
             && PageParser.matchProperty("\(property.key):: \(property.value)") == property
     }
 
-    /// `title::` overrides the display name. (SPEC §4.2)
+    /// Page metadata takes precedence over the first block's legacy title.
     public func displayTitle(
         using dateFormat: JournalDateFormat, locale: Locale = .current
     ) -> String {
+        if let title = preambleProperties.first(where: { $0.key == "title" })?.value,
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return title
+        }
         if let t = pageProperties.first(where: { $0.key == "title" })?.value,
            !t.isEmpty {
             return t

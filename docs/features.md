@@ -331,8 +331,10 @@ status:: active
 ```
 
 Page-level properties can make the page itself appear in a property query. The
-special first-block property `title::` overrides the page's displayed title; the
-page's link identity and filename remain unchanged.
+special page property `title::` overrides the page's displayed title. A nonblank
+page-level value takes precedence over `title::` on the first outline block,
+which remains supported as a fallback. The page's link identity and filename
+remain unchanged.
 
 ## Journal
 

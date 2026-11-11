@@ -6,6 +6,27 @@ import KnopoCore
 
 @MainActor
 @Suite struct LogseqPageEditingTests {
+    @Test func pageTitleEditUpdatesDisplayAndUndoesWithoutRenaming() throws {
+        try withPage { app in
+            let original = app.document(for: "Logseq")
+            let url = app.store.fileURL(forPageNamed: original.name)
+            let session = PagePropertyEditSession()
+            session.begin(app: app, pageName: original.name, index: 0, inserting: true)
+            session.text = "title:: Custom title"
+            #expect(session.finish())
+            #expect(app.displayTitle(for: app.document(for: original.name)) == "Custom title")
+            app.undo()
+            #expect(app.displayTitle(for: app.document(for: original.name)) == original.name)
+            app.redo()
+            #expect(app.displayTitle(for: app.document(for: original.name)) == "Custom title")
+            app.flushPendingSaves()
+            #expect(app.document(for: original.name).nameKey == original.nameKey)
+            #expect(app.store.fileURL(forPageNamed: original.name) == url)
+            let saved = try String(contentsOf: url, encoding: .utf8)
+            #expect(saved == "title:: Custom title\r\n" + PageSerializer.serialize(preamble: original.preamble, blocks: original.blocks))
+        }
+    }
+
     @Test func headingContinuationUsesBodyFontsAndLineHeights() throws {
         let source = "# Heading **bold**\nBody **bold** and `code`\nstatus:: open"
         let rendered = BlockRenderer.render(content: source, context: .init())
