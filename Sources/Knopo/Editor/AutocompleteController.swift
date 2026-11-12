@@ -40,6 +40,7 @@ final class AutocompleteController: NSObject {
 
     // Data providers, injected by the outline controller.
     var fetchPages: (String) -> [String] = { _ in [] }
+    var pageExists: (String) -> Bool = { _ in false }
     var fetchBlocks: (String) -> [SearchHit] = { _ in [] }
     var fetchTags: (String) -> [String] = { _ in [] }
     /// Called after a `((uuid))` insert so the source page persists `id::` (§7.1).
@@ -220,6 +221,7 @@ final class AutocompleteController: NSObject {
             var out = fetchPages(query).prefix(12).map(Item.page)
             let trimmed = query.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty, PageName.isValid(trimmed),
+               !pageExists(trimmed),
                !out.contains(where: {
                    if case .page(let name) = $0 {
                        return PageName.key(name) == PageName.key(trimmed)

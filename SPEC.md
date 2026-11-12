@@ -139,7 +139,7 @@ Rules:
 - `id:: <uuid>` is written as a property line under a block **only when the block is referenced** by at least one block reference. Unreferenced blocks carry no persisted id (their UUIDs live only in the cache), keeping files clean. Once written, an `id::` is never removed automatically.
 - `collapsed:: true` is persisted the same way, only when true.
 - Numbered items use `knopo.list-type:: ordered` on each item. Existing `logseq.order-list-type:: number` items are also numbered and keep their key through edits and saves. Either recognized value enables numbering; unknown values remain stored and do not mask the other key. New items always use the Knopo key. Removing numbering clears both keys. Explicitly writing a Knopo value other than `ordered` also removes the Logseq key. Both keys are hidden presentation properties: preserved in files, omitted from focused source and rendered property text. Preamble properties do not number blocks.
-- First-block properties (`key:: value` lines) are parsed, displayed, and round-tripped; `title::` overrides the display name. Preamble `tags::` properties carry page-scoped tags (§8.2). `key:: value` lines written un-bulleted in the preamble (the Logseq page-property convention) are also indexed as page properties — stored page-scoped, kept distinct from block properties — so `{{query key:: value}}` surfaces the page as a page-level result (even a properties-only page with no blocks), without conflating page and block properties. The `title::` display override reads the first preamble `title` when nonblank, then falls back to the first block's `title`. Page identity and filename remain unchanged.
+- First-block properties (`key:: value` lines) are parsed, displayed, and round-tripped; `title::` overrides the display name and `alias::` supplies alternative page names (§6.3). Preamble `tags::` properties carry page-scoped tags (§8.2). `key:: value` lines written un-bulleted in the preamble (the Logseq page-property convention) are also indexed as page properties — stored page-scoped, kept distinct from block properties — so `{{query key:: value}}` surfaces the page as a page-level result (even a properties-only page with no blocks), without conflating page and block properties. The `title::` display override reads the first preamble `title` when nonblank, then falls back to the first block's `title`. Page identity and filename remain unchanged.
 - **Page metadata edits inline.** Click a property label or value to edit its `key:: value` source in place. Page tags render as the same chips as block tags; chip clicks open the tag view, while the label and surrounding space enter editing. A pencil appears on hover or keyboard focus. Typing a single `key:: value` line in an initially empty first block and pressing Enter creates page metadata and starts the next property line, including in the journal feed. Enter in existing metadata commits the row and inserts a new property draft immediately after it. Enter on a blank metadata line moves to the first outline block. A click outside commits without inserting a row; Tab and Shift+Tab move between properties; Escape dismisses completion before ending the edit. Properties beneath ordinary block content remain attached to that block. **Add Page Property** in the page or sidebar-card menu is an optional shortcut to an inline draft, and a property’s context menu can remove it. There is no separate form or permanent edit-button row. Each completed edit is undoable. Properties remain un-bulleted and page-scoped, untouched lines retain their source, and fenced examples are ignored. Invalid or conflicting drafts remain editable; drafts survive navigation within the running app. A conflict offers Reload Property before committing.
 - Files edited externally are detected via file-watcher and reloaded; if the page is open with unsaved changes, last-writer-wins with the losing version saved to `.knopo/conflicts/`.
 - The app must **round-trip** files byte-stably: opening and saving a page without edits must not change the file.
@@ -317,7 +317,7 @@ A block can carry a background color, rendered as a soft rounded box behind its 
 
 ### 6.1 Syntax and behavior
 
-- Typing `[[` opens an autocomplete popup listing pages by fuzzy match on name, ranked by match closeness (exact → prefix → substring → loose subsequence) then recency of access, including an option to create a new page with the typed text.
+- Typing `[[` opens an autocomplete popup listing pages by fuzzy match on name, ranked by match closeness (exact → prefix → substring → loose subsequence) then recency of access. An option to create a page with the typed text appears when it is a valid name that does not already identify a page, alias, or referenced stub. Cmd+K follows the same rule; existing stubs open directly and get a file when content is added.
 - A committed reference is stored literally as `[[Page Name]]` in the block's Markdown.
 - Rendered as a link; click navigates to the page. `Cmd+Click` opens it in the right sidebar.
 - Referencing a non-existent page creates a **stub** (see §3.2) — navigable, shows linked references, gets a file only once content is added.
@@ -327,9 +327,27 @@ A block can carry a background color, rendered as a soft rounded box behind its 
 
 Renaming a page rewrites every `[[Old Name]]` occurrence across the graph to `[[New Name]]` (case-insensitive match, preserving surrounding text), then renames the file. This is a single undoable operation and is the only cross-file write the app performs implicitly.
 
-### 6.3 Aliases — out of scope
+### 6.3 Aliases
 
-No `alias::` support in v1. One page, one name.
+`alias:: AI, [[Machine Intelligence]]` gives a page alternative names. Put it in
+the un-bulleted page preamble or the first block's properties. Commas separate
+names; `[[...]]` is optional and keeps a comma inside a name, such as
+`[[Doe, Jane]]`. Properties on later blocks do not define page aliases.
+A closing `]]` must be followed by a comma or the end of the value, with optional
+whitespace in between. An entry with other trailing text is ignored.
+
+- Names are case-insensitive. Empty, invalid, self-referencing, and duplicate
+  aliases are ignored. Date names remain reserved for their journal days.
+- Alias names appear in `[[` autocomplete and page search. Links preserve the
+  written alias and open the owning page, including sidebar views, previews,
+  and page embeds. Aliases do not create separate files or All Pages entries.
+- Backlinks and page-reference queries include references to the page's name
+  and its aliases. Tags remain independent labels.
+- A real page name takes precedence over an alias. If multiple pages claim an
+  alias, it stays unresolved until the conflict is removed.
+- Renaming the owning page preserves its aliases and links written with them.
+  Removing an alias leaves those links pointing to an ordinary page or stub.
+  Unlinked References continues to search the owning page's name.
 
 ---
 
@@ -532,7 +550,7 @@ Rationale for going native over a web-view shell (Tauri/Electron): the spec is m
 
 ## 16. Out of scope (explicit)
 
-Whiteboards; HTTP/API server; plugin system; sync/collaboration; mobile; **editable-in-place** embeds (read-only `{{embed …}}` is supported — §7.6); flashcards; PDF annotation; org-mode files; aliases; hierarchical tag semantics; encryption.
+Whiteboards; HTTP/API server; plugin system; sync/collaboration; mobile; **editable-in-place** embeds (read-only `{{embed …}}` is supported — §7.6); flashcards; PDF annotation; org-mode files; hierarchical tag semantics; encryption.
 
 ## 17. Queries — `{{query …}}`
 

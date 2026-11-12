@@ -44,7 +44,7 @@ struct PageScreen: View {
             }
             if !inPane {
                 Divider().padding(.vertical, 8)
-                ReferencesSection(pageName: pageName)
+                ReferencesSection(pageName: doc.name)
             }
         }
         .padding(Self.contentInset)
@@ -117,7 +117,7 @@ struct PageScreen: View {
     }
 
     private func performRename() {
-        guard PageName.isValid(renameText), renameText != pageName else {
+        guard PageName.isValid(renameText), renameText != app.store.canonicalPageName(for: pageName) else {
             renameSheetShown = false
             return
         }

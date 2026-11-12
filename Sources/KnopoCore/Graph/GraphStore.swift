@@ -289,6 +289,20 @@ public final class GraphStore {
 
     // MARK: - Page access
 
+    public func canonicalPageName(for name: String) -> String {
+        pageIdentity(for: name).name
+    }
+
+    private func pageIdentity(for name: String) -> (key: String, name: String) {
+        let originalKey = PageName.key(name)
+        if let doc = loaded[originalKey],
+           doc.fileExists || doc.isJournal || (doc.isDirty && !doc.isEffectivelyEmpty) {
+            return (originalKey, doc.name)
+        }
+        guard let indexed = try? cache.pageIdentity(named: name) else { return (originalKey, name) }
+        return (indexed.key, loaded[indexed.key]?.name ?? indexed.name)
+    }
+
     public func fileURL(forPageNamed name: String) -> URL {
         let isJournal = JournalDate(pageName: name) != nil
         return (isJournal ? journalsDir : pagesDir)
@@ -298,17 +312,13 @@ public final class GraphStore {
     /// Loads a page, or materializes an in-memory stub if no file exists.
     /// Every navigable name resolves: real pages, stubs, journal days.
     public func page(named name: String) -> PageDocument {
-        let key = PageName.key(name)
+        let (key, name) = pageIdentity(for: name)
         if let doc = loaded[key] { return doc }
-        // Resolve to the on-disk display name for this key. This is what maps a
-        // canonical date key back to the actual file — e.g. an ISO reference
-        // `2026-06-10` to the imported journal file `2026_06_10.md`.
-        let resolvedName = (try? cache.page(key: key))?.displayName ?? name
-        let url = fileURL(forPageNamed: resolvedName)
+        let url = fileURL(forPageNamed: name)
         var doc: PageDocument
         if FileManager.default.fileExists(atPath: url.path) {
-            doc = Self.read(url: url, name: resolvedName,
-                            isJournal: JournalDate(pageName: resolvedName) != nil)
+            doc = Self.read(url: url, name: name,
+                            isJournal: JournalDate(pageName: name) != nil)
             try? cache.reuseIndexedIDs(in: &doc, stamp: Self.stamp(of: url))
         } else {
             // New page/stub. A journal stub canonicalizes to its ISO name, so a
@@ -323,9 +333,16 @@ public final class GraphStore {
         return doc
     }
 
-    public func isLoaded(_ name: String) -> Bool { loaded[PageName.key(name)] != nil }
+    public func isLoaded(_ name: String) -> Bool {
+        loaded[pageIdentity(for: name).key] != nil
+    }
 
     public func numbering(onPageNamed name: String) throws -> OutlineNumbering.Snapshot {
+        try numbering(onCanonicalPageNamed: canonicalPageName(for: name))
+    }
+
+    /// Names from documents and index results already identify the owning page.
+    public func numbering(onCanonicalPageNamed name: String) throws -> OutlineNumbering.Snapshot {
         let key = PageName.key(name)
         guard let doc = loaded[key] else { return try cache.numberingSnapshot(onPageNamed: name) }
         if let snapshot = loadedNumbering[key] { return snapshot }
@@ -354,7 +371,7 @@ public final class GraphStore {
     /// Captures only main-thread-owned state. The returned value is independent
     /// of `loaded` and can be serialized/indexed by a background writer.
     public func pageSaveSnapshot(named name: String) -> PageSaveSnapshot? {
-        let key = PageName.key(name)
+        let key = pageIdentity(for: name).key
         guard let doc = loaded[key] else { return nil }
         if !doc.fileExists && doc.isEffectivelyEmpty {
             // Empty journal days and reference stubs remain file-less (§10).
@@ -389,7 +406,7 @@ public final class GraphStore {
 
     public func createPage(named name: String) throws -> PageDocument {
         guard PageName.isValid(name) else { throw GraphError.invalidPageName(name) }
-        let key = PageName.key(name)
+        let key = try cache.canonicalPageKey(for: name)
         if let existing = try cache.page(key: key), existing.fileExists {
             throw GraphError.pageAlreadyExists(name)
         }
@@ -402,6 +419,7 @@ public final class GraphStore {
     /// Moves the page's file to the OS trash (SPEC §13). Incoming `[[refs]]`
     /// now point at a stub; incoming `((refs))` go broken.
     public func deletePage(named name: String) throws {
+        let name = canonicalPageName(for: name)
         let key = PageName.key(name)
         // Trash the actual backing file, which for an imported journal may be a
         // Logseq `2026_03_01.md` rather than the canonical `2026-03-01.md`.
@@ -478,9 +496,12 @@ public final class GraphStore {
     @discardableResult
     public func renamePage(from oldName: String, to newName: String) throws -> Set<String> {
         guard PageName.isValid(newName) else { throw GraphError.invalidPageName(newName) }
+        let oldName = canonicalPageName(for: oldName)
+        guard oldName != newName else { return [] }
         let oldKey = PageName.key(oldName)
         let newKey = PageName.key(newName)
-        if oldKey != newKey, let existing = try cache.page(key: newKey), existing.fileExists {
+        let targetKey = try cache.canonicalPageKey(for: newName)
+        if targetKey != oldKey, let existing = try cache.page(key: targetKey), existing.fileExists {
             throw GraphError.pageAlreadyExists(newName)
         }
 
