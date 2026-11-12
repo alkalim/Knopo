@@ -866,6 +866,8 @@ final class OutlineEditorController: NSObject {
         renderedWithWeight = BlockRenderer.contentWeight
         renderedWithDateFormat = BlockRenderer.journalDateFormat
         if pageName != self.pageName || zoom != self.zoom {
+            // A reused journal editor must not keep its previous day's matches.
+            nav.find.unregister(self)
             revealRequest = nil
             self.pageName = pageName
             self.zoom = zoom
@@ -877,6 +879,7 @@ final class OutlineEditorController: NSObject {
             rebuildRows()
             reloadAllRows()
             tableView.invalidateIntrinsicContentSize()
+            if tableView.window != nil { nav.find.register(self) }
         } else if bracketsChanged || fontZoomChanged || densityChanged || weightChanged
                     || dateFormatChanged {
             // A global rendering preference flipped (brackets, content zoom, or

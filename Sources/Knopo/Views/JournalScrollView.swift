@@ -89,10 +89,16 @@ struct JournalScrollView: NSViewRepresentable {
                 }
                 days = newDays
                 heights = heights.filter { newSet.contains($0.key) }
-                table.beginUpdates()
-                table.removeRows(at: IndexSet(oldDays.indices.filter { !newSet.contains(oldDays[$0]) }.map { $0 + 1 }), withAnimation: [])
-                table.insertRows(at: IndexSet(newDays.indices.filter { !oldSet.contains(newDays[$0]) }.map { $0 + 1 }), withAnimation: [])
-                table.endUpdates()
+                if initial {
+                    // Bulk insertion prepares offscreen editors before layout.
+                    // Reload only visible rows when first opening the feed.
+                    table.reloadData()
+                } else {
+                    table.beginUpdates()
+                    table.removeRows(at: IndexSet(oldDays.indices.filter { !newSet.contains(oldDays[$0]) }.map { $0 + 1 }), withAnimation: [])
+                    table.insertRows(at: IndexSet(newDays.indices.filter { !oldSet.contains(newDays[$0]) }.map { $0 + 1 }), withAnimation: [])
+                    table.endUpdates()
+                }
             }
             if initial, let index = days.firstIndex(of: today), index > 0 {
                 // Make today's editor available for its initial writing focus.

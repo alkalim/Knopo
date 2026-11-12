@@ -6,6 +6,60 @@ import KnopoCore
 
 @MainActor
 @Suite struct JournalScrollTests {
+    @Test(arguments: [0, 8])
+    func openingThreeYearsOfJournalsLoadsOnlyNearbyDays(futureDays: Int) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-journal-history-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        let today = JournalDate.today()
+        let days = (-futureDays..<1_095).map { today.adding(days: -$0).pageName }
+        let content = (0..<30).map { "- Entry \($0) with **formatting**, a [[Page]] reference and a #tag.\n" }.joined()
+        for day in days {
+            try content.write(to: store.fileURL(forPageNamed: day), atomically: true, encoding: .utf8)
+        }
+        try store.synchronizeIndex()
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+        nav.navigate(to: .page(name: "Another page"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 450),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        defer { window.contentView = nil }
+        let host = NSHostingView(rootView: MainWindow()
+            .environmentObject(app).environmentObject(nav))
+        window.contentView = host
+        for _ in 0..<10 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        nav.goToJournal()
+        for _ in 0..<10 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let loaded = days.filter { store.isLoaded($0) }
+        #expect(store.isLoaded(today.pageName))
+        // Allow AppKit's prefetch margin without constructing weeks of editors.
+        #expect(loaded.count < 20)
+        #expect(!store.isLoaded(days.last!))
+        #expect(nav.current == .journalHome)
+        let editor = try #require(window.firstResponder as? BlockEditorTextView)
+        #expect(!editor.visibleRect.isEmpty)
+        let feed = try #require(tables(in: host).first?.enclosingScrollView?.documentView as? JournalTableView)
+        #expect(feed.numberOfRows == days.count + 2)
+        let coordinator = try #require(feed.delegate as? JournalScrollView.Coordinator)
+        #expect(coordinator.days == days)
+        try await Task.sleep(for: .milliseconds(600))
+        window.makeFirstResponder(nil)
+        feed.scrollRowToVisible(days.count)
+        for _ in 0..<10 {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.isLoaded(days.last!))
+        #expect(days.filter { store.isLoaded($0) }.count < 40)
+    }
+
     @Test(arguments: [NSScroller.Style.legacy, .overlay])
     func initialWidthAccountsForScrollbar(style: NSScroller.Style) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-scrollbar-\(UUID())")
