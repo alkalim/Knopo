@@ -94,7 +94,8 @@ struct SearchPalette: View {
         HStack(spacing: 8) {
             switch result {
             case .page(let name):
-                Image(systemName: JournalDate(pageName: name) != nil ? "calendar" : "doc.text")
+                let pageName = app.store.canonicalPageName(for: name)
+                Image(systemName: JournalDate(pageName: pageName) != nil ? "calendar" : "doc.text")
                     .foregroundStyle(.secondary)
                 Text(app.displayTitle(for: name))
             case .createPage(let name):
