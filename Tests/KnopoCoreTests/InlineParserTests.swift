@@ -315,6 +315,68 @@ import Foundation
         expectEqual(InlineParser.parse("[[unclosed"), [.text("[[unclosed")])
     }
 
+    @Test(arguments: [("[", ""), ("(", ""), ("{", ""), ("![", ""),
+                      ("[", "]"), ("[", "]]"), ("(", "))"), ("![", "]"),
+                      ("[", "]("), ("![", "](")])
+    func repeatedUnmatchedDelimitersStayLiteral(opener: String, closer: String) {
+        let source = String(repeating: opener, count: 128) + closer + "👩🏽‍💻 e\u{301}"
+        expectEqual(InlineParser.parseSpans(source), [
+            InlineSpan(node: .text(source), range: NSRange(location: 0, length: source.utf16.count)),
+        ])
+        expectNil(InlineParser.settingImageWidth(source, imageIndex: 0, width: 200))
+    }
+
+    @Test func failedDelimiterSearchesDoNotCrossLinesOrParses() {
+        let broken = "[[ (( {{ ![ ** ~~ == ` $ ](unclosed"
+        let valid = "[[Page]] #[[Tag]] **bold** ~~gone~~ ==lit== `code` $x$ {{embed [[Other]]}} ![a](x.png)"
+        let source = broken + "\n" + valid
+        expectEqual(InlineParser.parse(source), [.text(broken), .lineBreak] + InlineParser.parse(valid))
+        expectEqual(InlineParser.parse("[[Next]]"), [.pageRef("Next")])
+        let refs = RefExtractor.extract(from: source)
+        expectEqual(refs.pageRefs, ["Page", "Other"])
+        expectEqual(refs.tags, ["tag"])
+        expectEqual(InlineParser.settingImageWidth(source, imageIndex: 0, width: 200),
+                    broken + "\n" + valid.replacingOccurrences(of: "![a]", with: "![a|200]"))
+    }
+
+    @Test func failedDelimitersPreserveNestedMarkupEscapesAndSpans() {
+        let prefix = "👩🏽‍💻 e\u{301} [[broken "
+        let markup = "**[[also broken *ok* \\#literal**"
+        let source = prefix + markup
+        let nodes: [InlineNode] = [
+            .text(prefix), .bold([.text("[[also broken "), .italic([.text("ok")]), .text(" #literal")]),
+        ]
+        let spans = InlineParser.parseSpans(source)
+        expectEqual(spans.map(\.node), nodes)
+        expectEqual(spans.map(\.range), [
+            NSRange(location: 0, length: prefix.utf16.count),
+            NSRange(location: prefix.utf16.count, length: markup.utf16.count),
+        ])
+        expectEqual(spans.map { (source as NSString).substring(with: $0.range) }, [prefix, markup])
+        expectEqual(RefExtractor.extract(from: source), ExtractedRefs())
+    }
+
+    @Test func failedLongerClosersStillAllowShorterTokens() {
+        expectEqual(InlineParser.parse("[[label](x_(y))"), [.link(label: "[label", url: "x_(y)")])
+        expectEqual(InlineParser.parse("***a*"), [.text("**"), .italic([.text("a")])])
+        expectEqual(InlineParser.parse("![a](x.png){unclosed ![b](y.png)"), [
+            .image(alt: "a", src: "x.png"), .text("{unclosed "), .image(alt: "b", src: "y.png"),
+        ])
+        expectEqual(InlineParser.settingImageWidth("[[label](x) ![a](y)", imageIndex: 0, width: 200),
+                    "[[label](x) ![a|200](y)")
+    }
+
+    @Test func rejectedNamesAndIDsDoNotHideLaterReferences() {
+        let id = "6F1C9E2A-3B4D-4C5E-8F90-1A2B3C4D5E6F"
+        let prefix = "[[[Page]] (((" + id + ")) #[[  Tag  ]]"
+        expectEqual(InlineParser.parse(prefix), [
+            .text("["), .pageRef("Page"), .text(" ("), .blockRef(UUID(uuidString: id)!),
+            .text(" "), .tag("tag"),
+        ])
+        expectEqual(InlineParser.settingImageWidth(prefix + " ![a](x)", imageIndex: 0, width: 200),
+                    prefix + " ![a|200](x)")
+    }
+
     @Test func blockKinds() {
         expectEqual(BlockKind.classify("## Title"), .heading(level: 2, text: "Title"))
         expectEqual(BlockKind.classify("> quoted"), .quote(text: "quoted"))

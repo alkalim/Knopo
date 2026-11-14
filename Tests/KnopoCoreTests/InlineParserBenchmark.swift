@@ -5,6 +5,46 @@ import Testing
 /// Opt-in scaling checks. Run in release with `scripts/benchmark.sh`, or:
 /// KNOPO_BENCH=1 ./scripts/test.sh -c release --filter InlineParserBenchmark
 @Suite struct InlineParserBenchmark {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["KNOPO_BENCH"] != nil),
+          arguments: [("[", ""), ("(", ""), ("{", ""), ("![", ""),
+                      ("[", "]"), ("[", "]]"), ("(", "))"), ("![", "]"),
+                      ("[", "]("), ("![", "](")])
+    func unmatchedDelimiterScaling(opener: String, closer: String) {
+        for resizeImage in [false, true] {
+            var timings: [Double] = []
+            for count in [512, 1_024, 2_048, 4_096] {
+                let source = String(repeating: opener, count: count) + closer
+                    + (closer == "](" ? String(repeating: "x", count: count) : "")
+                func run() -> Bool {
+                    if resizeImage {
+                        return InlineParser.settingImageWidth(source, imageIndex: 0, width: 200) == nil
+                    }
+                    return InlineParser.parseSpans(source) == [
+                        InlineSpan(node: .text(source), range: NSRange(location: 0, length: source.utf16.count)),
+                    ]
+                }
+                expectTrue(run())
+                var samples: [Double] = []
+                for _ in 0..<5 {
+                    // Batch fast runs so the largest samples exceed a millisecond.
+                    let start = DispatchTime.now().uptimeNanoseconds
+                    var valid = true
+                    for _ in 0..<16 { valid = run() && valid }
+                    samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 16 / 1_000_000)
+                    expectTrue(valid)
+                }
+                let median = samples.sorted()[samples.count / 2]
+                timings.append(median)
+                print(String(format: "DELIMITER BENCH %@ %@: %d characters, median %.3f ms",
+                             resizeImage ? "resize" : "parse", opener + "…" + closer, source.count, median))
+            }
+            let growth = timings[3] / max(timings[2], 0.001)
+            print(String(format: "DELIMITER BENCH %@ %@: final doubling %.2fx",
+                         resizeImage ? "resize" : "parse", opener + "…" + closer, growth))
+            expectTrue(growth < 3.5, "Malformed \(opener)…\(closer) should not approach quadratic growth")
+        }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["KNOPO_BENCH"] != nil))
     func autolinkScaling() {
         let inputs: [(label: String, make: (Int) -> String, spanCount: Int)] = [

@@ -3,4 +3,4 @@
 set -e
 cd "$(dirname "$0")/.."
 KNOPO_BENCH=1 KNOPO_SIDEBAR_BENCH=1 ./scripts/test.sh -c release \
-  --filter 'InlineParserBenchmark|EditCostBenchmark|SidebarOpenBenchmark' "$@"
+  --filter 'InlineParserBenchmark|TypingCostBenchmark|EditCostBenchmark|SidebarOpenBenchmark' "$@"

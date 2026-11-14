@@ -752,16 +752,18 @@ final class BlockEditorTextView: NSTextView {
         let regex: NSRegularExpression
         let attributes: [NSAttributedString.Key: Any]
         var fontStyle: FontStyle = .none
+        var requiredCapture: Int? = nil
     }
 
     private static let rules: [Rule] = {
         func rule(_ pattern: String, _ attributes: [NSAttributedString.Key: Any],
                   options: NSRegularExpression.Options = [],
-                  fontStyle: Rule.FontStyle = .none) -> Rule? {
+                  fontStyle: Rule.FontStyle = .none, requiredCapture: Int? = nil) -> Rule? {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
                 return nil
             }
-            return Rule(regex: regex, attributes: attributes, fontStyle: fontStyle)
+            return Rule(regex: regex, attributes: attributes, fontStyle: fontStyle,
+                        requiredCapture: requiredCapture)
         }
         return [
             // Block-level prefixes (SPEC §5.2). Heading text gets its real
@@ -795,7 +797,10 @@ final class BlockEditorTextView: NSTextView {
                  [.backgroundColor: NSColor.quaternarySystemFill,
                   .foregroundColor: NSColor.systemOrange],
                  fontStyle: .mono),
-            rule("(?<!\\\\)\\[[^\\]\\n]*\\]\\([^)\\n]*\\)", [.foregroundColor: NSColor.linkColor]),
+            // Consume incomplete candidates once instead of retrying every inner '['.
+            // Only a complete destination captures its closing parenthesis.
+            rule(#"(?<!\\)\[[^\]\n]*(?:\](?:\([^)\n]*(\))?)?)?"#,
+                 [.foregroundColor: NSColor.linkColor], requiredCapture: 1),
             rule("(?<!\\\\)\\[\\[[^\\[\\]\\n]+\\]\\]",
                  [.foregroundColor: NSColor.linkColor]),
             rule("(?<!\\\\)\\(\\([0-9a-fA-F-]{36}\\)\\)",
@@ -884,6 +889,8 @@ final class BlockEditorTextView: NSTextView {
         for rule in Self.rules where !isFence {
             rule.regex.enumerateMatches(in: source, options: [], range: full) { match, _, _ in
                 guard let match else { return }
+                if let capture = rule.requiredCapture,
+                   match.range(at: capture).location == NSNotFound { return }
                 var attrs = rule.attributes
                 let font = storage.attribute(.font, at: match.range.location, effectiveRange: nil) as? NSFont ?? base
                 switch rule.fontStyle {

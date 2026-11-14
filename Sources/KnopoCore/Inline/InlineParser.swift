@@ -265,33 +265,52 @@ public enum InlineParser {
         var size: ImageSize?
     }
 
-    private static func find(
-        _ close: [Character], in chars: [Character], from: Int, sameLine: Bool = true
-    ) -> Int? {
-        var index = from
-        while index + close.count <= chars.count {
-            if sameLine, chars[index] == "\n" { return nil }
-            if Array(chars[index..<index + close.count]) == close { return index }
-            index += 1
-        }
-        return nil
-    }
+    private struct DelimiterSearch {
+        let chars: [Character]
+        var results: [[Character]: (starts: ClosedRange<Int>, end: Int?)] = [:]
+        var urlResult: (from: Int, end: Int?)?
 
-    private static func findURLEnd(in chars: [Character], from: Int) -> Int? {
-        var depth = 0
-        var index = from
-        while index < chars.count {
-            switch chars[index] {
-            case "\n": return nil
-            case "(": depth += 1
-            case ")":
-                if depth == 0 { return index }
-                depth -= 1
-            default: break
+        /// Finds the first closer before a newline or the end of the input.
+        mutating func find(_ close: [Character], from: Int) -> Int? {
+            if let result = results[close], result.starts.contains(from) { return result.end }
+            var index = from
+            while index + close.count <= chars.count {
+                if chars[index] == "\n" { break }
+                if chars[index..<index + close.count].elementsEqual(close) {
+                    results[close] = (from...index, index)
+                    return index
+                }
+                index += 1
             }
-            index += 1
+            // Searches starting anywhere in this range have the same result.
+            // The lower bound keeps image lookahead from hiding earlier matches.
+            results[close] = (from...index, nil)
+            return nil
         }
-        return nil
+
+        /// Finds the destination's closing parenthesis, allowing balanced inner pairs.
+        /// Malformed labels can retry the same destination, so remember its result.
+        mutating func findURLEnd(from: Int) -> Int? {
+            if let result = urlResult, result.from == from { return result.end }
+            var depth = 0
+            var index = from
+            while index < chars.count {
+                if chars[index] == "\n" { break }
+                switch chars[index] {
+                case "(": depth += 1
+                case ")":
+                    if depth == 0 {
+                        urlResult = (from, index)
+                        return index
+                    }
+                    depth -= 1
+                default: break
+                }
+                index += 1
+            }
+            urlResult = (from, nil)
+            return nil
+        }
     }
 
     private static func pipeImageSize(in rawAlt: String) -> (alt: String, size: ImageSize?) {
@@ -336,11 +355,13 @@ public enum InlineParser {
         return ImageSize(width: width, height: height)
     }
 
-    private static func imageToken(in chars: [Character], at start: Int) -> ImageToken? {
+    private static func imageToken(
+        in chars: [Character], at start: Int, search: inout DelimiterSearch
+    ) -> ImageToken? {
         guard start + 1 < chars.count, chars[start] == "!", chars[start + 1] == "[",
-              let altEnd = find(["]"], in: chars, from: start + 2),
+              let altEnd = search.find(["]"], from: start + 2),
               altEnd + 1 < chars.count, chars[altEnd + 1] == "(",
-              let srcEnd = findURLEnd(in: chars, from: altEnd + 2) else { return nil }
+              let srcEnd = search.findURLEnd(from: altEnd + 2) else { return nil }
 
         let rawAlt = String(chars[start + 2..<altEnd])
         let parsedAlt = pipeImageSize(in: rawAlt)
@@ -348,7 +369,7 @@ public enum InlineParser {
         var end = srcEnd + 1
         var logseqSize: ImageSize?
         if end < chars.count, chars[end] == "{",
-           let suffixEnd = find(["}"], in: chars, from: end + 1),
+           let suffixEnd = search.find(["}"], from: end + 1),
            let parsed = parseLogseqSize(String(chars[end + 1..<suffixEnd])) {
             logseqSize = parsed
             end = suffixEnd + 1
@@ -370,6 +391,7 @@ public enum InlineParser {
     /// so the two index spaces don't line up on their own.
     public static func parseSpans(_ text: String) -> [InlineSpan] {
         let chars = Array(text)
+        var search = DelimiterSearch(chars: chars)
         var nodes: [InlineNode] = []
         var spans: [NSRange] = []
         var literal = ""
@@ -396,38 +418,6 @@ public enum InlineParser {
         }
 
         func slice(_ a: Int, _ b: Int) -> String { String(chars[a..<b]) }
-
-        /// Index just past `close`, searching from `from`; nil if absent
-        /// before a newline (when sameLine) or end.
-        func find(_ close: [Character], from: Int, sameLine: Bool = true) -> Int? {
-            var j = from
-            while j + close.count <= chars.count {
-                if sameLine, chars[j] == "\n" { return nil }
-                if Array(chars[j..<j + close.count]) == close { return j }
-                j += 1
-            }
-            return nil
-        }
-
-        /// Index of the `)` that closes a link/image destination, honoring
-        /// parens *inside* the URL (e.g. `…/image_(3).png`) by tracking nesting —
-        /// CommonMark allows balanced parens in a destination. nil if none on the
-        /// line. Without this the first inner `)` truncates the URL and the
-        /// image/link breaks.
-        func findURLEnd(from: Int) -> Int? {
-            var depth = 0
-            var j = from
-            while j < chars.count {
-                switch chars[j] {
-                case "\n": return nil
-                case "(": depth += 1
-                case ")": if depth == 0 { return j }; depth -= 1
-                default: break
-                }
-                j += 1
-            }
-            return nil
-        }
 
         func isTagChar(_ c: Character) -> Bool {
             c.isLetter || c.isNumber || c == "-" || c == "_"
@@ -499,7 +489,7 @@ public enum InlineParser {
                 i += 1
 
             case "`":
-                if let end = find(["`"], from: i + 1), end > i + 1 {
+                if let end = search.find(["`"], from: i + 1), end > i + 1 {
                     flush()
                     nodes.append(.code(slice(i + 1, end)))
                     i = end + 1
@@ -509,18 +499,18 @@ public enum InlineParser {
 
             case "[":
                 if i + 1 < chars.count, chars[i + 1] == "[" {
-                    if let end = find(["]", "]"], from: i + 2),
-                       case let name = slice(i + 2, end),
-                       !name.isEmpty, !name.contains("["), !name.contains("]") {
+                    if let end = search.find(["]", "]"], from: i + 2),
+                       end > i + 2,
+                       !chars[i + 2..<end].contains(where: { $0 == "[" || $0 == "]" }) {
                         flush()
-                        nodes.append(.pageRef(name))
+                        nodes.append(.pageRef(slice(i + 2, end)))
                         i = end + 2
                         continue
                     }
                 }
-                if let labelEnd = find(["]"], from: i + 1),
+                if let labelEnd = search.find(["]"], from: i + 1),
                    labelEnd + 1 < chars.count, chars[labelEnd + 1] == "(",
-                   let urlEnd = findURLEnd(from: labelEnd + 2) {
+                   let urlEnd = search.findURLEnd(from: labelEnd + 2) {
                     flush()
                     nodes.append(.link(label: slice(i + 1, labelEnd), url: slice(labelEnd + 2, urlEnd)))
                     i = urlEnd + 1
@@ -529,7 +519,7 @@ public enum InlineParser {
                 }
 
             case "!":
-                if let image = Self.imageToken(in: chars, at: i) {
+                if let image = Self.imageToken(in: chars, at: i, search: &search) {
                     flush()
                     nodes.append(.image(alt: image.alt, src: image.src, size: image.size))
                     i = image.end
@@ -539,7 +529,8 @@ public enum InlineParser {
 
             case "(":
                 if i + 1 < chars.count, chars[i + 1] == "(",
-                   let end = find([")", ")"], from: i + 2),
+                   let end = search.find([")", ")"], from: i + 2),
+                   end - (i + 2) == 36,
                    let uuid = UUID(uuidString: slice(i + 2, end)) {
                     flush()
                     nodes.append(.blockRef(uuid))
@@ -553,7 +544,7 @@ public enum InlineParser {
                 // Any other `{{…}}` (e.g. future `{{query …}}`) stays literal,
                 // honouring the §17 reservation.
                 if i + 1 < chars.count, chars[i + 1] == "{",
-                   let end = find(["}", "}"], from: i + 2) {
+                   let end = search.find(["}", "}"], from: i + 2) {
                     let inner = slice(i + 2, end)
                     if let target = Self.embedTarget(inner) {
                         flush()
@@ -577,10 +568,11 @@ public enum InlineParser {
                     || "([{'\"".contains(prev!)
                 guard boundaryOK else { literal.append(c); i += 1; continue }
                 if i + 2 < chars.count, chars[i + 1] == "[", chars[i + 2] == "[" {
-                    if let end = find(["]", "]"], from: i + 3),
+                    if let end = search.find(["]", "]"], from: i + 3),
+                       !chars[i + 3..<end].contains(where: { $0 == "[" || $0 == "]" }),
                        case let name = slice(i + 3, end)
                            .trimmingCharacters(in: .whitespaces).lowercased(),
-                       !name.isEmpty, !name.contains("["), !name.contains("]") {
+                       !name.isEmpty {
                         flush()
                         nodes.append(.tag(name))
                         i = end + 2
@@ -601,17 +593,17 @@ public enum InlineParser {
 
             case "*":
                 if i + 2 < chars.count, chars[i + 1] == "*", chars[i + 2] == "*",
-                   let end = find(["*", "*", "*"], from: i + 3), end > i + 3 {
+                   let end = search.find(["*", "*", "*"], from: i + 3), end > i + 3 {
                     // `***text***` → bold + italic (CommonMark strong+emphasis).
                     flush()
                     nodes.append(.bold([.italic(parse(slice(i + 3, end)))]))
                     i = end + 3
                 } else if i + 1 < chars.count, chars[i + 1] == "*",
-                   let end = find(["*", "*"], from: i + 2), end > i + 2 {
+                   let end = search.find(["*", "*"], from: i + 2), end > i + 2 {
                     flush()
                     nodes.append(.bold(parse(slice(i + 2, end))))
                     i = end + 2
-                } else if let end = find(["*"], from: i + 1), end > i + 1,
+                } else if let end = search.find(["*"], from: i + 1), end > i + 1,
                           chars[i + 1] != "*" {
                     flush()
                     nodes.append(.italic(parse(slice(i + 1, end))))
@@ -622,7 +614,7 @@ public enum InlineParser {
 
             case "~":
                 if i + 1 < chars.count, chars[i + 1] == "~",
-                   let end = find(["~", "~"], from: i + 2), end > i + 2 {
+                   let end = search.find(["~", "~"], from: i + 2), end > i + 2 {
                     flush()
                     nodes.append(.strike(parse(slice(i + 2, end))))
                     i = end + 2
@@ -632,7 +624,7 @@ public enum InlineParser {
 
             case "=":
                 if i + 1 < chars.count, chars[i + 1] == "=",
-                   let end = find(["=", "="], from: i + 2), end > i + 2 {
+                   let end = search.find(["=", "="], from: i + 2), end > i + 2 {
                     flush()
                     nodes.append(.highlight(parse(slice(i + 2, end))))
                     i = end + 2
@@ -641,7 +633,7 @@ public enum InlineParser {
                 }
 
             case "$":
-                if let end = find(["$"], from: i + 1), end > i + 1 {
+                if let end = search.find(["$"], from: i + 1), end > i + 1 {
                     flush()
                     nodes.append(.math(slice(i + 1, end)))
                     i = end + 1
@@ -725,6 +717,7 @@ public enum InlineParser {
     ) -> String? {
         guard imageIndex >= 0 else { return nil }
         let chars = Array(content)
+        var search = DelimiterSearch(chars: chars)
         var images: [ImageToken] = []
         var index = 0
         while index < chars.count {
@@ -736,33 +729,34 @@ public enum InlineParser {
                     index += 1
                 }
             case "`":
-                if let end = find(["`"], in: chars, from: index + 1), end > index + 1 {
+                if let end = search.find(["`"], from: index + 1), end > index + 1 {
                     index = end + 1
                 } else {
                     index += 1
                 }
             case "$":
-                if let end = find(["$"], in: chars, from: index + 1), end > index + 1 {
+                if let end = search.find(["$"], from: index + 1), end > index + 1 {
                     index = end + 1
                 } else {
                     index += 1
                 }
             case "[":
                 if index + 1 < chars.count, chars[index + 1] == "[",
-                   let end = find(["]", "]"], in: chars, from: index + 2),
-                   case let name = String(chars[index + 2..<end]),
-                   !name.isEmpty, !name.contains("["), !name.contains("]") {
+                   let end = search.find(["]", "]"], from: index + 2),
+                   end > index + 2,
+                   !chars[index + 2..<end].contains(where: { $0 == "[" || $0 == "]" }) {
                     index = end + 2
-                } else if let labelEnd = find(["]"], in: chars, from: index + 1),
+                } else if let labelEnd = search.find(["]"], from: index + 1),
                           labelEnd + 1 < chars.count, chars[labelEnd + 1] == "(",
-                          let urlEnd = findURLEnd(in: chars, from: labelEnd + 2) {
+                          let urlEnd = search.findURLEnd(from: labelEnd + 2) {
                     index = urlEnd + 1
                 } else {
                     index += 1
                 }
             case "(":
                 if index + 1 < chars.count, chars[index + 1] == "(",
-                   let end = find([")", ")"], in: chars, from: index + 2),
+                   let end = search.find([")", ")"], from: index + 2),
+                   end - (index + 2) == 36,
                    UUID(uuidString: String(chars[index + 2..<end])) != nil {
                     index = end + 2
                 } else {
@@ -770,13 +764,13 @@ public enum InlineParser {
                 }
             case "{":
                 if index + 1 < chars.count, chars[index + 1] == "{",
-                   let end = find(["}", "}"], in: chars, from: index + 2) {
+                   let end = search.find(["}", "}"], from: index + 2) {
                     index = end + 2
                 } else {
                     index += 1
                 }
             case "!":
-                if let image = imageToken(in: chars, at: index) {
+                if let image = imageToken(in: chars, at: index, search: &search) {
                     images.append(image)
                     index = image.end
                 } else {
