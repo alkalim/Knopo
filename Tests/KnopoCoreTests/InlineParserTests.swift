@@ -140,6 +140,61 @@ import Foundation
         expectEqual(InlineParser.parse("`https://a.b`"), [.code("https://a.b")])
     }
 
+    @Test(arguments: ["http", "HTTP", "hTtP", "https", "HTTPS", "hTtPs"])
+    func autolinkSchemePreservesCase(scheme: String) {
+        let url = "\(scheme)://example.com/Path"
+        expectEqual(InlineParser.parse(url), [.autolink(url)])
+    }
+
+    @Test(arguments: [
+        "h", "H", "ht", "htt", "http", "https", "http:", "http:/", "http://",
+        "https:/", "https://", "httpss://example.com", "httpx://example.com", "hello",
+    ])
+    func incompleteOrInvalidAutolinkSchemeStaysLiteral(source: String) {
+        expectEqual(InlineParser.parse(source), [.text(source)])
+    }
+
+    @Test func autolinkTrimsOnlyExcessClosingParentheses() {
+        let cases: [(url: String, suffix: String)] = [
+            ("https://example.com/a_(b)", "))"),
+            ("https://example.com/a_((b))", ").,!?'\""),
+            ("https://example.com/a_(b", ""),
+            ("https://example.com/a)b(c", ")"),
+            ("https://example.com/", String(repeating: ")", count: 128)),
+        ]
+        for (url, suffix) in cases {
+            let expected: [InlineNode] = [.autolink(url)] + (suffix.isEmpty ? [] : [.text(suffix)])
+            expectEqual(InlineParser.parse(url + suffix), expected, url + suffix)
+        }
+        expectEqual(InlineParser.parse("https://).,!"), [.text("https://).,!")])
+    }
+
+    @Test func autolinkSpansPreserveUnicodeOffsetsAndTrimmedText() {
+        let prefix = "👩🏽‍💻 e\u{301} ("
+        let url = "HtTpS://例え.test/a_(b)"
+        let suffix = "))."
+        let source = prefix + url + suffix
+        let spans = InlineParser.parseSpans(source)
+        expectEqual(spans.map(\.node), [.text(prefix), .autolink(url), .text(suffix)])
+        expectEqual(spans.map(\.range), [
+            NSRange(location: 0, length: prefix.utf16.count),
+            NSRange(location: prefix.utf16.count, length: url.utf16.count),
+            NSRange(location: prefix.utf16.count + url.utf16.count, length: suffix.utf16.count),
+        ])
+        expectEqual(spans.map { (source as NSString).substring(with: $0.range) }, [prefix, url, suffix])
+    }
+
+    @Test func autolinksKeepMarkupBoundariesAndReferenceExtraction() {
+        let url = "HTTP://example.com/a_(b)"
+        expectEqual(InlineParser.parse("**\(url)**"), [.bold([.autolink(url)])])
+        expectEqual(InlineParser.parse("\(url)\tend\nhttps://a.b<after>"), [
+            .autolink(url), .text("\tend"), .lineBreak, .autolink("https://a.b"), .text("<after>"),
+        ])
+        let refs = RefExtractor.extract(from: "https://example.com/#hidden [[Real]] #visible")
+        expectEqual(refs.pageRefs, ["Real"])
+        expectEqual(refs.tags, ["visible"])
+    }
+
     @Test func pipeImageSizes() {
         expectEqual(
             InlineParser.parse("![a|363](x.png)"),

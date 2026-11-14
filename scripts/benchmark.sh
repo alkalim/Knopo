@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Opt-in AppKit benchmarks use the test harness for access to app internals.
+# Opt-in core and AppKit benchmarks share the test harness.
 set -e
 cd "$(dirname "$0")/.."
 KNOPO_BENCH=1 KNOPO_SIDEBAR_BENCH=1 ./scripts/test.sh -c release \
-  --filter 'EditCostBenchmark|SidebarOpenBenchmark' "$@"
+  --filter 'InlineParserBenchmark|EditCostBenchmark|SidebarOpenBenchmark' "$@"

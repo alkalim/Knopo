@@ -439,11 +439,16 @@ public enum InlineParser {
         /// `(see https://x.com/a_(b)).` links `https://x.com/a_(b)`, not the
         /// trailing `).`. (GFM-style autolink.)
         func autolinkEnd(from: Int) -> Int? {
-            let rest = String(chars[from...]).lowercased()
-            let scheme = rest.hasPrefix("https://") ? 8 : (rest.hasPrefix("http://") ? 7 : 0)
+            // Only copy the scheme prefix, never the remaining block.
+            let prefix = String(chars[from...].prefix(8)).lowercased()
+            let scheme = prefix.hasPrefix("https://") ? 8 : (prefix.hasPrefix("http://") ? 7 : 0)
             guard scheme > 0 else { return nil }
             var end = from + scheme
+            // Count once so trimming closing parentheses does not rescan the URL.
+            var parenthesisBalance = 0
             while end < chars.count, !chars[end].isWhitespace, !"<>`".contains(chars[end]) {
+                if chars[end] == "(" { parenthesisBalance += 1 }
+                else if chars[end] == ")" { parenthesisBalance -= 1 }
                 end += 1
             }
             guard end > from + scheme else { return nil } // need a host
@@ -452,9 +457,9 @@ public enum InlineParser {
                 case ".", ",", ";", ":", "!", "?", "'", "\"":
                     end -= 1
                 case ")":
-                    let opens = chars[from..<end].lazy.filter { $0 == "(" }.count
-                    let closes = chars[from..<end].lazy.filter { $0 == ")" }.count
-                    if closes > opens { end -= 1 } else { break trim }
+                    guard parenthesisBalance < 0 else { break trim }
+                    parenthesisBalance += 1
+                    end -= 1
                 default:
                     break trim
                 }
