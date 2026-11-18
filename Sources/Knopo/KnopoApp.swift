@@ -90,11 +90,14 @@ final class GraphManager: ObservableObject {
 
     /// KNOPO_GRAPH env var wins; then the last graph opened from the app;
     /// then ~/Documents/Knopo.
-    static func defaultRoot() -> URL {
-        if let path = ProcessInfo.processInfo.environment["KNOPO_GRAPH"], !path.isEmpty {
+    static func defaultRoot(
+        environmentPath: String? = ProcessInfo.processInfo.environment["KNOPO_GRAPH"],
+        defaults: UserDefaults = .standard
+    ) -> URL {
+        if let path = environmentPath, !path.isEmpty {
             return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
         }
-        if let saved = UserDefaults.standard.string(forKey: lastGraphKey),
+        if let saved = defaults.string(forKey: lastGraphKey),
            FileManager.default.fileExists(atPath: saved) {
             return URL(fileURLWithPath: saved, isDirectory: true)
         }

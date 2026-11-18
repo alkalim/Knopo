@@ -11,10 +11,8 @@ import Testing
     }
 
     @Test func equalDatesHaveAStableNameOrderAndInvalidDatesArePages() {
-        let groups = ["2026_10_10": 1, "2026-10-10": 2, "2026-02-30": 3, "Alpha": 4]
+        let groups = ["Oct 10th, 2026": 1, "2026-10-10": 2, "2026-02-30": 3, "Alpha": 4]
         let sorted = PageGroupOrder.sorted(groups).map(\.key)
-        expectEqual(Set(sorted.prefix(2)), Set(["2026_10_10", "2026-10-10"]))
-        expectEqual(Array(sorted[2...]), ["2026-02-30", "Alpha"])
-        expectEqual(sorted, PageGroupOrder.sorted(groups).map(\.key))
+        expectEqual(sorted, ["2026-10-10", "Oct 10th, 2026", "2026-02-30", "Alpha"])
     }
 }

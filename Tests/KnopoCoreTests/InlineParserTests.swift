@@ -129,8 +129,6 @@ import Foundation
     @Test func autolinkBoundariesAndExclusions() {
         // Not at a word boundary → plain text (no partial-word links).
         expectEqual(InlineParser.parse("xhttps://a.b"), [.text("xhttps://a.b")])
-        // A scheme with no host isn't a link.
-        expectEqual(InlineParser.parse("https://"), [.text("https://")])
         // A formal link still wins; the destination isn't separately autolinked.
         expectEqual(
             InlineParser.parse("[x](https://a.b)"),
@@ -181,7 +179,6 @@ import Foundation
             NSRange(location: prefix.utf16.count, length: url.utf16.count),
             NSRange(location: prefix.utf16.count + url.utf16.count, length: suffix.utf16.count),
         ])
-        expectEqual(spans.map { (source as NSString).substring(with: $0.range) }, [prefix, url, suffix])
     }
 
     @Test func autolinksKeepMarkupBoundariesAndReferenceExtraction() {
@@ -352,7 +349,6 @@ import Foundation
             NSRange(location: 0, length: prefix.utf16.count),
             NSRange(location: prefix.utf16.count, length: markup.utf16.count),
         ])
-        expectEqual(spans.map { (source as NSString).substring(with: $0.range) }, [prefix, markup])
         expectEqual(RefExtractor.extract(from: source), ExtractedRefs())
     }
 

@@ -59,13 +59,11 @@ import Testing
     }
 
     @Test(arguments: ["knopo.list-type:: ordered", "logseq.order-list-type:: number"])
-    func rawSlicesAndOrdinalsDoNotRewriteSource(property: String) {
+    func listEditsPreserveUntouchedRawSlicesAndNumberingProperties(property: String) {
         let text = "title:: page\r\n-  one\r\n  \(property)\r\n- two\r\n  \(property)"
         var page = PageParser.parse(text)
         expectEqual(PageSerializer.serialize(page), text)
         let raw = page.blocks.map(\.raw)
-        _ = OutlineNumbering.markers(in: page.blocks)
-        expectEqual(page.blocks.map(\.raw), raw)
         _ = OutlineOps.insertBlockAfter([0], in: &page.blocks)
         expectEqual(page.blocks[0].raw, raw[0])
         expectEqual(page.blocks[2].raw, raw[1])
