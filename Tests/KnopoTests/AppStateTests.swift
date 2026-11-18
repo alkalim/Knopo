@@ -125,6 +125,37 @@ import KnopoCore
         #expect(mars < stub)
     }
 
+    @MainActor
+    @Test func pageSearchKeepsNewestUnicodeEquivalentRecent() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knopo-search-recents-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        let cafe = "Caf\u{00e9}"
+        let decomposedCafe = "Cafe\u{0301}"
+        for name in [cafe, "Cabin"] {
+            var doc = try store.createPage(named: name)
+            doc.blocks[0].content = "notes"
+            store.updatePage(doc)
+            try store.savePage(named: name)
+        }
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+
+        app.recordVisit(toPageNamed: cafe)
+        app.recordVisit(toPageNamed: "Cabin")
+        app.recordVisit(toPageNamed: decomposedCafe)
+        // SQLite keeps both spellings, but Swift considers their keys equal.
+        let recentKeys = try store.cache.recentPageKeys()
+        try #require(recentKeys.count == 3)
+        #expect(recentKeys[0] == recentKeys[2])
+        #expect(!recentKeys[0].utf8.elementsEqual(recentKeys[2].utf8))
+
+        #expect(Array(app.pageNames(matching: "").prefix(2)) == [cafe, "Cabin"])
+        #expect(app.pageNames(matching: "Ca") == [cafe, "Cabin"])
+        #expect(app.pageNames(matching: "CAFE") == [cafe])
+    }
+
     /// Keystrokes coalesce into one undo entry per edit session (SPEC §13), and
     /// that entry doesn't exist until the session closes — so undo has to close
     /// the open session *before* it pops, or it steps past the edit you just made.

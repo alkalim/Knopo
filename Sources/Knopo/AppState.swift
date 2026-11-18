@@ -656,8 +656,10 @@ final class AppState: ObservableObject {
     func pageNames(matching query: String) -> [String] {
         let listings = allPages() + (query.isEmpty ? [] : ((try? store.cache.aliasListings()) ?? []))
         let recentKeys = (try? store.cache.recentPageKeys()) ?? []
+        // SQLite can store Unicode spellings that Swift treats as equal keys.
+        // Keep the newest visit when those keys coincide.
         let recencyRank: [String: Int] = Dictionary(
-            uniqueKeysWithValues: recentKeys.enumerated().map { ($1, $0) }
+            recentKeys.enumerated().map { ($1, $0) }, uniquingKeysWith: min
         )
         func recency(_ key: String) -> Int { recencyRank[key] ?? Int.max }
         if query.isEmpty {
