@@ -330,11 +330,19 @@ status:: active
 - First project note
 ```
 
-Page-level properties can make the page itself appear in a property query. The
-special page property `title::` overrides the page's displayed title. A nonblank
-page-level value takes precedence over `title::` on the first outline block,
-which remains supported as a fallback. The page's link identity and filename
-remain unchanged.
+Page-level properties can make the page itself appear in a property query.
+
+The optional `title::` property gives an opened page a custom heading, page
+breadcrumb, and window/tab title while keeping its existing filename and links.
+It is useful for imported notes or when the page name needs to stay fixed. For example, a
+dated journal opened as a page can have the heading "Conference notes"; the
+journal feed still shows its date. A nonblank page-level value takes precedence
+over `title::` on the first outline block, which remains supported as a fallback.
+
+Use **Rename** to change the page's name, and `alias::` for additional names you
+can search and link to. A title alone does not provide another linkable name or
+page-autocomplete result. References and navigation lists keep their name/date
+labels. Most pages need only a readable page name.
 
 ## Journal
 
