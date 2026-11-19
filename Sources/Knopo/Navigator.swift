@@ -71,9 +71,21 @@ final class Navigator: ObservableObject {
     private var history = NavHistory()
     private var graphChanges: AnyCancellable?
 
-    init(app: AppState) {
+    init(app: AppState, initialTarget: NavTarget? = nil) {
         self.app = app
         find.nav = self
+        if let initialTarget {
+            current = resolve(initialTarget) ?? .journalHome
+        } else {
+            restoreRightPanes()
+        }
+        restored = true
+        graphChanges = app.$dataVersion.dropFirst().sink { [weak self] _ in
+            self?.refreshResolvedTargets()
+        }
+    }
+
+    private func restoreRightPanes() {
         // Restore the right-sidebar panes saved for this graph (§12). Done after
         // stored-property init so `resolve` (which reads `app`) is available.
         // Duplicates saved by earlier builds are dropped here, keeping the
@@ -93,10 +105,6 @@ final class Navigator: ObservableObject {
             .compactMap(RightPane.init(encoded:))
             .compactMap { pane in paneTarget(pane.target).map { RightPane(target: $0, collapsed: pane.collapsed) } }
             .deduplicatedByTarget()
-        restored = true
-        graphChanges = app.$dataVersion.dropFirst().sink { [weak self] _ in
-            self?.refreshResolvedTargets()
-        }
     }
 
     // MARK: - Navigation

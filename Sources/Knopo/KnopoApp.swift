@@ -155,20 +155,26 @@ final class GraphHandle: ObservableObject {
     @Published private(set) var app: AppState
     @Published private(set) var root: URL
 
-    init(manager: GraphManager) {
+    let openedSeparately: Bool
+    private(set) var initialTarget: NavTarget?
+
+    init(manager: GraphManager, request: WindowRequest?) {
         self.manager = manager
         // A tab is built before its own window takes key, so the active graph
         // is still that of the window it was opened from.
-        let root = GraphManager.rootForNewWindow(
+        let root = request?.root ?? GraphManager.rootForNewWindow(
             inheriting: ActiveGraph.shared.actions?.app.store.root)
         self.root = root
         self.app = manager.acquireOrFatal(root)
+        self.initialTarget = request?.target
+        self.openedSeparately = request != nil
     }
 
     func openGraph() {
         guard let url = GraphManager.runOpenPanel() else { return }
         do {
             app = try manager.acquire(url)
+            initialTarget = nil
             root = url
             manager.rememberLast(url)
         } catch {
@@ -236,14 +242,16 @@ struct KnopoApp: App {
         // Each window owns its own graph (a `GraphHandle`); a new window opens
         // the last-used graph, and Open Graph… switches only that window.
         // `as String`: the app's name is a proper noun, not a translatable key.
-        WindowGroup("Knopo" as String) {
-            WindowRoot(manager: manager)
+        WindowGroup("Knopo" as String, for: WindowRequest.self) { request in
+            WindowRoot(manager: manager, request: request.wrappedValue)
                 .frame(minWidth: 900, minHeight: 560)
+                // The request sets the starting page. Discard it before scene restoration.
+                .onAppear { request.wrappedValue = nil }
         }
         // Open at the remembered size so the window doesn't flash a default
         // size and then resize to the restored frame. (Position is still
-        // restored by WindowConfigurator.)
-        .defaultSize(WindowConfigurator.savedFrame()?.size ?? CGSize(width: 1100, height: 720))
+        // restored by WindowGeometry.)
+        .defaultSize(WindowGeometry.savedFrame()?.size ?? CGSize(width: 1100, height: 720))
         .commands {
             // All graph-scoped actions target whichever window is focused.
             GraphCommands()
@@ -323,13 +331,14 @@ private struct GraphCommands: Commands {
 private struct WindowRoot: View {
     @StateObject private var handle: GraphHandle
 
-    init(manager: GraphManager) {
-        _handle = StateObject(wrappedValue: GraphHandle(manager: manager))
+    init(manager: GraphManager, request: WindowRequest?) {
+        _handle = StateObject(wrappedValue: GraphHandle(manager: manager, request: request))
     }
 
     var body: some View {
-        GraphView(app: handle.app, openGraph: handle.openGraph)
+        GraphView(app: handle.app, initialTarget: handle.initialTarget, openGraph: handle.openGraph)
             .id(ObjectIdentifier(handle.app))
+            .background(WindowGeometry(openedSeparately: handle.openedSeparately))
     }
 }
 
@@ -341,10 +350,13 @@ private struct GraphView: View {
     @StateObject private var nav: Navigator
     @State private var graphSettingsPresented = false
 
-    init(app: AppState, openGraph: @escaping () -> Void) {
+    let initialTarget: NavTarget?
+
+    init(app: AppState, initialTarget: NavTarget?, openGraph: @escaping () -> Void) {
         self.app = app
+        self.initialTarget = initialTarget
         self.openGraph = openGraph
-        _nav = StateObject(wrappedValue: Navigator(app: app))
+        _nav = StateObject(wrappedValue: Navigator(app: app, initialTarget: initialTarget))
     }
 
     private var actions: GraphActions {
@@ -355,7 +367,7 @@ private struct GraphView: View {
     }
 
     var body: some View {
-        MainWindow()
+        MainWindow(hideSidebar: initialTarget != nil)
             // Name the scene after the graph: otherwise SwiftUI writes the app's
             // name, which `refreshTabTitle` reads back as this window's graph.
             .navigationTitle(app.store.root.lastPathComponent)
@@ -382,13 +394,6 @@ private struct GraphView: View {
     }
 }
 
-/// Reaches the hosting NSWindow to (a) persist its frame across launches and
-/// (b) label the window's *tab* with the current page.
-///
-/// We persist the frame ourselves under a stable key rather than relying on
-/// SwiftUI's automatic autosave: that key is derived from the (private, nested)
-/// `RootView`'s mangled type name, which embeds a per-launch pointer — so it
-/// changes every launch and never restores.
 /// `⌘1`-`⌘8` select that tab of the focused window's tab group. `⌘9` selects
 /// the last one, as in Safari. Key equivalents, not menu items: nine more rows
 /// in the Window menu would be clutter.
@@ -429,13 +434,84 @@ enum TabShortcuts {
     }
 }
 
-/// An `NSView` that reports when it's added to a window — the earliest hook to
-/// position the window before its first display (avoiding a reposition flash).
+/// Reports when the SwiftUI view enters its window.
 private final class WindowHookView: NSView {
     var onWindow: ((NSWindow) -> Void)?
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let window { onWindow?(window) }
+    }
+}
+
+/// Keeps window placement tied to the window even when its graph changes.
+struct WindowGeometry: NSViewRepresentable {
+    let openedSeparately: Bool
+    static let mainFrameKey = "KnopoMainWindowFrame"
+    static let separateFrameKey = "KnopoSeparateWindowFrame"
+
+    /// The last saved window frame, if present, valid, and on an attached
+    /// screen. Used both to restore the frame and to seed the WindowGroup's
+    /// default size so the window opens at the remembered size (no resize flash).
+    static func savedFrame(forKey frameKey: String = mainFrameKey) -> NSRect? {
+        guard let saved = UserDefaults.standard.string(forKey: frameKey) else { return nil }
+        let rect = NSRectFromString(saved)
+        guard rect.width >= 200, rect.height >= 200,
+              NSScreen.screens.contains(where: { $0.visibleFrame.intersects(rect) })
+        else { return nil }
+        return rect
+    }
+
+    func makeNSView(context: Context) -> FrameView {
+        let view = FrameView()
+        view.openedSeparately = openedSeparately
+        return view
+    }
+
+    func updateNSView(_ view: FrameView, context: Context) {}
+
+    final class FrameView: NSView {
+        private static let separateWindows = NSHashTable<NSWindow>.weakObjects()
+        var openedSeparately = false
+        private var frameKey: String { openedSeparately ? separateFrameKey : mainFrameKey }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self)
+            guard let window else { return }
+
+            window.minSize = NSSize(width: 900, height: 560)
+            window.tabbingIdentifier = "knopo"
+            if openedSeparately {
+                Self.separateWindows.add(window)
+                // Opt out of automatic grouping for the first presentation only.
+                window.tabbingMode = .disallowed
+                DispatchQueue.main.async { window.tabbingMode = .preferred }
+            } else {
+                window.tabbingMode = .preferred
+            }
+
+            if let rect = WindowGeometry.savedFrame(forKey: frameKey) {
+                window.setFrame(rect, display: false)
+            } else if openedSeparately {
+                window.setContentSize(NSSize(width: 900, height: 600))
+                window.center()
+            }
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification,
+                         NSWindow.didEndLiveResizeNotification] {
+                center.addObserver(self, selector: #selector(saveFrame), name: name, object: window)
+            }
+        }
+
+        @objc private func saveFrame(_ notification: Notification) {
+            guard let window, window.isVisible, !window.isMiniaturized,
+                  !window.styleMask.contains(.fullScreen) else { return }
+            if window.inLiveResize && notification.name != NSWindow.didEndLiveResizeNotification { return }
+            if let selected = window.tabGroup?.selectedWindow, selected !== window { return }
+            // All tabs share the frame of the window that contains them.
+            let hasSeparateTab = window.tabbedWindows?.contains(where: Self.separateWindows.contains) == true
+            UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: hasSeparateTab ? separateFrameKey : frameKey)
+        }
     }
 }
 
@@ -445,22 +521,9 @@ struct WindowConfigurator: NSViewRepresentable {
     let onActivate: () -> Void
     let graphName: String
     let pageTitle: String
-    private static let frameKey = "KnopoMainWindowFrame"
     /// Posted when a window's graph/page changes or a window closes, so every
     /// tab re-decides whether to graph-qualify its title.
     private static let windowsChanged = Notification.Name("knopoWindowsChanged")
-
-    /// The last saved window frame, if present, valid, and on an attached
-    /// screen. Used both to restore the frame and to seed the WindowGroup's
-    /// default size so the window opens at the remembered size (no resize flash).
-    static func savedFrame() -> NSRect? {
-        guard let saved = UserDefaults.standard.string(forKey: frameKey) else { return nil }
-        let rect = NSRectFromString(saved)
-        guard rect.width >= 200, rect.height >= 200,
-              NSScreen.screens.contains(where: { $0.visibleFrame.intersects(rect) })
-        else { return nil }
-        return rect
-    }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -489,9 +552,7 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        // Restore the frame the moment the view enters its window — before the
-        // window is first displayed — so the saved position is set without a
-        // visible reposition. `updateNSView`'s deferred configure is a fallback.
+        // Install observers as soon as this view enters the window.
         let view = WindowHookView()
         let coordinator = context.coordinator
         view.onWindow = { [self] window in configure(window, coordinator) }
@@ -515,21 +576,12 @@ struct WindowConfigurator: NSViewRepresentable {
         }
     }
 
-    /// One-time per window: restore the saved frame and start saving changes.
-    /// Runs after SwiftUI has applied its (non-restoring) default size, so our
-    /// `setFrame` wins and sticks.
+    /// Observe this window while it shows the current graph.
     private func configure(_ window: NSWindow?, _ coordinator: Coordinator) {
         guard let window, !coordinator.configured else { return }
         coordinator.configured = true
         coordinator.window = window
         window.title = graphName
-        window.minSize = NSSize(width: 900, height: 560)
-        // Native tabs: new scenes merge into one tab group, so `Cmd+T` ("New
-        // Tab") works and tabs are available regardless of the system "prefer
-        // tabs" setting. Each tab is its own scene/graph; detach a window via
-        // Window → Move Tab to New Window.
-        window.tabbingMode = .preferred
-        window.tabbingIdentifier = "knopo"
         // Menu commands target the graph of whichever window is active. Set it
         // now (this window may already be key) and on every activation after.
         onActivate()
@@ -538,16 +590,6 @@ struct WindowConfigurator: NSViewRepresentable {
         ) { [onActivate] _ in
             MainActor.assumeIsolated { onActivate() }
         })
-        if let rect = Self.savedFrame() {
-            window.setFrame(rect, display: true)
-        }
-        let save: (Notification) -> Void = { _ in
-            UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.frameKey)
-        }
-        for name in [NSWindow.didEndLiveResizeNotification, NSWindow.didMoveNotification] {
-            coordinator.observers.append(NotificationCenter.default.addObserver(
-                forName: name, object: window, queue: .main, using: save))
-        }
         // Re-qualify our title when any window changes graph/page…
         coordinator.observers.append(NotificationCenter.default.addObserver(
             forName: Self.windowsChanged, object: nil, queue: .main) { [weak coordinator] _ in

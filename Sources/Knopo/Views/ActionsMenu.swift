@@ -1,5 +1,23 @@
 import SwiftUI
 
+struct WindowRequest: Codable, Hashable {
+    let root: URL
+    let target: NavTarget
+}
+
+struct OpenInNewWindow: View {
+    @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var app: AppState
+    let target: NavTarget
+
+    var body: some View {
+        Button("Open in New Window") {
+            if let name = target.pageName { app.recordVisit(toPageNamed: name) }
+            openWindow(value: WindowRequest(root: app.store.root, target: target))
+        }
+    }
+}
+
 /// The app's standard borderless "⋯" actions menu: a plain ellipsis (no circle,
 /// no disclosure chevron), tinted tertiary (matching the cards' close button).
 /// Used by the page header, the tag view, and the right-pane cards so they all

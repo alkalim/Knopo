@@ -12,7 +12,11 @@ struct MainWindow: View {
     @State private var rightFraction: CGFloat?
     @State private var dragStartWidth: CGFloat?
     @GestureState private var isDraggingDivider = false
-    @StateObject private var sidebarTransition = SidebarTransition.State()
+    @StateObject private var sidebarTransition: SidebarTransition.State
+
+    init(hideSidebar: Bool = false) {
+        _sidebarTransition = StateObject(wrappedValue: SidebarTransition.State(hideSidebar: hideSidebar))
+    }
 
     private let mainMinWidth: CGFloat = 320
     private let rightMinWidth: CGFloat = 280

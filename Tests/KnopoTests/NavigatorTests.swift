@@ -5,6 +5,39 @@ import KnopoCore
 
 @Suite struct NavigatorTests {
 
+    @MainActor
+    @Test func pageWindowStartsAtZoomWithFreshHistoryAndPanes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manager = GraphManager()
+        let app = try manager.acquire(root)
+        defer { app.shutdown() }
+        let store = app.store
+        let page = try store.createPage(named: "Notes")
+        let source = Navigator(app: app)
+        source.openInRightSidebar(.page(name: "Reference"))
+        let saved = store.config.rightPanes
+        let target = NavTarget.page(name: page.name, zoom: try #require(page.blocks.first?.id))
+        let request = WindowRequest(root: root, target: target)
+        let handle = GraphHandle(manager: manager, request: request)
+        #expect(handle.app === app)
+        let window = Navigator(app: handle.app, initialTarget: handle.initialTarget)
+        #expect(window.current == target)
+        #expect(!window.canGoBack)
+        #expect(window.rightPanes.isEmpty)
+        #expect(store.config.rightPanes == saved)
+        #expect(Navigator(app: app).rightPanes == source.rightPanes)
+
+        window.navigate(to: .allPages)
+        window.goBack()
+        #expect(window.current == target)
+        window.openInRightSidebar(.page(name: "Another reference"))
+        #expect(window.rightPanes.map(\.target) == [.page(name: "Another reference")])
+        #expect(store.config.rightPanes == window.rightPanes.map(\.encoded))
+        #expect(source.rightPanes.map(\.target) == [.page(name: "Reference")])
+        #expect(source.current == .journalHome)
+    }
+
     /// `⌘J` is "take me to today" — every press, not a toggle. It lands on the feed
     /// and asks for the caret in today from wherever you were, and each press is a
     /// fresh request: the token has to bump, or an outline whose SwiftUI view is

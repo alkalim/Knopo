@@ -114,6 +114,7 @@ Open Graph…
 Open day page (shows linked references)
 Open in Default App
 Open in Main View
+Open in New Window
 Open in Sidebar
 Open this block. ⌘-click or Shift-click to open in the right sidebar.
 Orange	Block background color

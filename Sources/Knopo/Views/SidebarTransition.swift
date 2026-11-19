@@ -21,9 +21,13 @@ enum SidebarTransition {
     }
 
     @MainActor final class State: ObservableObject {
-        @Published private var columnVisibility: NavigationSplitViewVisibility = .automatic
+        @Published private var columnVisibility: NavigationSplitViewVisibility
         weak var window: NSWindow?
         var preferences: Preferences?
+
+        init(hideSidebar: Bool) {
+            columnVisibility = hideSidebar ? .detailOnly : .automatic
+        }
 
         var visibility: Binding<NavigationSplitViewVisibility> {
             Binding(get: { self.columnVisibility }, set: { value in

@@ -90,6 +90,7 @@ struct PageScreen: View {
                 Button("Open in Sidebar") {
                     nav.openInRightSidebar(.page(name: pageName, zoom: zoom))
                 }
+                OpenInNewWindow(target: .page(name: pageName, zoom: zoom))
                 Button("Reveal in Finder") { PageActions.revealInFinder(pageName, app: app) }
                     .disabled(PageActions.file(of: pageName, app: app) == nil)
                 Divider()

@@ -381,6 +381,12 @@ Knopo also recognizes journal filenames that use underscores, such as
   to open them there.
 - Multiple windows or native tabs can show the same graph or different graphs.
   Views of the same graph share content, index updates, and undo history.
+- Choose **Open in New Window** from a page’s ⋯ menu, including on a right-sidebar
+  card, or right-click an entry in Recents, Tags, or Favourites. The new window
+  starts with both sidebars hidden and keeps any block zoom. Knopo remembers
+  the last size and position you used for these windows.
+  Use the toolbar or `⌃⌘S` to show the left sidebar, or `⌘`-click a link to open
+  a reference on the right.
 
 ## Images and assets
 

@@ -4,7 +4,7 @@ import KnopoCore
 
 /// A navigable destination. Pages and tag views can also open in right-sidebar
 /// panes (SPEC §12).
-enum NavTarget: Hashable {
+enum NavTarget: Hashable, Codable {
     /// A page, optionally zoomed into one block (breadcrumb root).
     case page(name: String, zoom: UUID? = nil)
     /// The generated, read-only tag view (SPEC §8.2).

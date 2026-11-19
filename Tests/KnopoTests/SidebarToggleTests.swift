@@ -26,7 +26,7 @@ import KnopoCore
         defer { app.shutdown() }
         let nav = Navigator(app: app)
         nav.navigate(to: .page(name: page.name))
-        let host = NSHostingView(rootView: MainWindow()
+        let host = NSHostingView(rootView: MainWindow(hideSidebar: usingMenu)
             .environmentObject(app).environmentObject(nav))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -38,6 +38,7 @@ import KnopoCore
         try await settle(window)
         let split = try #require(SidebarTransition.controller(in: host))
         let sidebar = try #require(split.splitViewItems.first)
+        if usingMenu { #expect(sidebar.isCollapsed) }
         let detail = try #require(split.splitView.arrangedSubviews.last)
         let table = try #require(descendants(host).compactMap { $0 as? OutlineTableView }.first)
         let controller = try #require(table.delegate as? OutlineEditorController)

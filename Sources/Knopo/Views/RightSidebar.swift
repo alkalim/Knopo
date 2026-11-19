@@ -164,8 +164,8 @@ struct RightSidebar: View {
         if hasTypeActions || nav.rightPanes.count > 1 {
             menuButton {
                 switch target {
-                case .page(let name, _): pageMenuItems(name)
-                case .journalHome: pageMenuItems(JournalDate.today().pageName)
+                case .page(let name, let zoom): pageMenuItems(name, zoom: zoom)
+                case .journalHome: pageMenuItems(JournalDate.today().pageName, zoom: nil)
                 case .tag(let tag): tagMenuItems(tag)
                 case .allPages: EmptyView()
                 }
@@ -182,12 +182,13 @@ struct RightSidebar: View {
     }
 
     @ViewBuilder
-    private func pageMenuItems(_ name: String) -> some View {
+    private func pageMenuItems(_ name: String, zoom: UUID?) -> some View {
         Button(app.store.config.isFavourite(name)
             ? "Remove from Favourites" : "Add to Favourites") {
             app.toggleFavourite(name)
         }
         Button("Open in Main View") { nav.navigate(to: .page(name: name)) }
+        OpenInNewWindow(target: .page(name: name, zoom: zoom))
         Button("Add Page Property") {
             nav.openInRightSidebar(.page(name: name))
             propertyRequests[PageName.key(name)] = UUID()

@@ -111,7 +111,7 @@ struct Sidebar: View {
                                     .layoutPriority(1)
                             }
                         }
-                        .contextMenu { tagFavouriteButton(entry.tag) }
+                        .contextMenu { tagMenuItems(entry.tag) }
                     }
                 }
             }
@@ -245,6 +245,7 @@ struct Sidebar: View {
                 app.toggleFavourite(name)
             }
             Button("Open in Sidebar") { nav.openInRightSidebar(.page(name: name)) }
+            OpenInNewWindow(target: .page(name: name))
         }
     }
 
@@ -254,16 +255,17 @@ struct Sidebar: View {
         sidebarRow(.favouriteTag(tag), target: .tag(tag)) {
             rowLabel(tag, icon: "number")
         }
-        .contextMenu { tagFavouriteButton(tag) }
+        .contextMenu { tagMenuItems(tag) }
     }
 
     @ViewBuilder
-    private func tagFavouriteButton(_ tag: String) -> some View {
+    private func tagMenuItems(_ tag: String) -> some View {
         Button(app.store.config.isFavouriteTag(tag)
             ? "Remove from Favourites" : "Add to Favourites") {
             app.toggleFavouriteTag(tag)
         }
         Button("Open in Sidebar") { nav.openInRightSidebar(.tag(tag)) }
+        OpenInNewWindow(target: .tag(tag))
     }
 
     private func displayName(for name: String) -> String {
