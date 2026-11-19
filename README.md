@@ -1,10 +1,9 @@
 # Knopo
 
-A native (AppKit, no Electron) macOS outliner in the Logseq tradition - your notes are blocks, pages are
+A native macOS outliner inspired by Logseq - your notes are blocks, pages are
 trees of blocks, and everything lives as plain Markdown files you own. Local-first,
-no account, no lock-in: the app is just a fast index and editor over a folder of
-`.md` files. Close Knopo and your graph is still a readable, greppable, git-able
-directory of Markdown.
+no account and no lock-in. The app is just a fast index and editor over a folder of
+`.md` files.
 
 ![Knopo showing a film-noir research page - an outline with a live query and tags - with a journal entry and a film page open as cards in the right sidebar](docs/screenshot.png)
 
@@ -13,14 +12,13 @@ directory of Markdown.
 - **Outliner editing** - every block is a node: `Enter` splits, `Tab`/`Shift+Tab`
   indent/outdent, `Alt+↑/↓` move, click a bullet to zoom in, click the triangle to
   fold. Markdown renders inline; the focused block shows raw source.
-- **Plain Markdown, byte-stable** - each block maps to a line in the file, and an
-  untouched block re-serializes exactly as written, so round-tripping never churns
-  your files.
+- **Plain Markdown** - blocks map directly to Markdown bullets. Unchanged blocks
+  stay exactly as written, so round-tripping produces no unnecessary file changes.
 - **Page links `[[Page]]`** - with stub pages, link autocomplete, and graph-wide
   rename that rewrites every reference.
 - **Block references & embeds** - `((block-id))` to point at a block, `{{embed …}}`
   to transclude a block or page read-only.
-- **Tags `#tag`** - labels (not pages), with a generated, click-through tag view.
+- **Tags `#tag`** - labels, with a generated click-through tag view.
 - **Queries `{{query …}}`** - a live, read-only result list from a small closed
   filter language: tags, page references, task state, and properties combined with
   `and` / `or` / `not`.
@@ -31,14 +29,13 @@ directory of Markdown.
 - **Search & find** - `⌘K` full-text search across the whole graph (SQLite FTS5),
   `⌘F` find within the current view.
 - **Right sidebar** - `⌘`/`Shift`-click opens pages and tag views as side-by-side
-  cards for reference work.
+  cards.
 - **Windows & tabs** - open several graphs at once, each in its own native window
   or tab (`⌘T` for a tab, **Open Graph…** to repoint one). The same graph open in
   two places stays in sync.
 - **TODO / DONE** blocks and **slash commands** (`/link`, `/date`, `/embed`, …).
 
-Some smaller touches: favourites & recents, content zoom, adjustable line spacing,
-and block background colors.
+Some smaller things: favourites & recents, content zoom, adjustable text display, block background colors, and more.
 
 See the [user guide](docs/features.md) for full documentation.
 
@@ -49,23 +46,19 @@ Quality and stability take priority over feature count. Each feature is chosen
 and reviewed on its own merits, rather than added just because another app has it.
 
 - **Markdown files** - Markdown is the source of truth and the app is
-  disposable. The graph stays readable, greppable, git-friendly, and byte-stable,
-  so editing never churns your files.
-- **On-demand loading** - the whole graph is never held in RAM; pages load
+  disposable. The graph stays readable, greppable, git-friendly, byte-stable.
+- **On-demand loading** - the whole graph is never held in memory; pages load
   on demand, so memory and startup stay flat as the graph grows.
 - **Indexed navigation** - a rebuildable SQLite index (`.knopo/cache.db`) backs
-  search, backlinks, tags, and queries, keeping navigation cheap on large graphs.
+  search, backlinks, tags and queries, keeping navigation cheap on large graphs.
 - **A real text editor** - Knopo uses AppKit and SwiftUI. The block you're editing
   is an actual macOS text view, so typing feels like it does everywhere else on
   the Mac. Web-based editors rebuild native behaviour by hand and rarely nail it.
 - **Small and quick** - no bundled browser, so it's a few megabytes, launches
-  instantly, and stays light on memory and battery for something you keep open all
-  day. (To be fair, that's mostly a dig at Electron, there are leaner web shells.)
-- **Fits the system** - real macOS window tabs, and dark mode, accent color, and
+  instantly, stays light on memory and battery for something you keep open all
+  day.
+- **Fits the system** - real macOS window tabs, dark mode, accent color,
   accessibility settings that follow the moment you change them.
-
-The trade-off is reach: Knopo is macOS-only, where web apps run everywhere from one
-codebase.
 
 ## How it compares
 
@@ -90,7 +83,7 @@ Early but very useable. On-disk conventions may still change.
 
 ## Graph layout
 
-A graph is a directory. Knopo lays out and maintains:
+A graph is a directory:
 
 ```
 <graph>/
