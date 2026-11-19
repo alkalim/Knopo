@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Testing
 @testable import Knopo
 
@@ -34,5 +35,22 @@ import Testing
         // -1 means nothing was drawn offscreen. Then this test proves nothing.
         try #require(inset >= 0)
         #expect(inset == Sidebar.selectionInset)
+    }
+
+    @Test func favouriteRowShowsItsSelectionBackground() {
+        var appeared = false
+        let list = List {
+            FavouriteRows(items: [.page("Alpine")], selection: { _ in
+                Color.gray.onAppear { appeared = true }
+            }, row: { _ in Text("Alpine") }, move: { _, _ in })
+        }
+        .listStyle(.sidebar)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 220, height: 80),
+                              styleMask: [], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: list)
+        defer { window.contentView = nil }
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        #expect(appeared)
     }
 }

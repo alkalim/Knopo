@@ -33,6 +33,13 @@ struct Sidebar: View {
         case favouriteTag(String) // tag
         case recent(String)       // page key
         case tag(String)
+
+        init(favourite: Favourite) {
+            switch favourite {
+            case .page(let name): self = .favourite(PageName.key(name))
+            case .tag(let tag): self = .favouriteTag(tag)
+            }
+        }
     }
 
     var body: some View {
@@ -43,6 +50,7 @@ struct Sidebar: View {
                 sidebarRow(.journal, target: .journalHome) {
                     Label(SectionName.journal, systemImage: "calendar").lineLimit(1)
                 }
+                .listRowBackground(selectionBackground(for: .journal))
                 .contextMenu {
                     Button("Jump to Day…") {
                         journalJumpDate = Date()
@@ -65,15 +73,18 @@ struct Sidebar: View {
                 sidebarRow(.allPages, target: .allPages) {
                     Label(SectionName.allPages, systemImage: "doc.on.doc").lineLimit(1)
                 }
+                .listRowBackground(selectionBackground(for: .allPages))
             }
 
             let favourites = app.store.config.orderedFavourites(limitPerKind: sectionLimit)
             if !favourites.isEmpty {
                 Section("Favourites", isExpanded: $favouritesExpanded) {
-                    FavouriteRows(items: favourites) { item in
+                    FavouriteRows(items: favourites, selection: { item in
+                        selectionBackground(for: RowID(favourite: item))
+                    }) { item in
                         switch item {
                         case .page(let name):
-                            pageRow(name, rowID: .favourite(PageName.key(name)), icon: "doc.text")
+                            pageRow(name, rowID: RowID(favourite: item), icon: "doc.text")
                         case .tag(let tag):
                             favouriteTagRow(tag)
                         }
@@ -91,8 +102,9 @@ struct Sidebar: View {
             if !recentsDisplay.isEmpty {
                 Section("Recents", isExpanded: $recentsExpanded) {
                     ForEach(recentsDisplay.prefix(sectionLimit), id: \.self) { name in
-                        pageRow(name, rowID: .recent(PageName.key(name)),
-                                icon: "clock")
+                        let rowID = RowID.recent(PageName.key(name))
+                        pageRow(name, rowID: rowID, icon: "clock")
+                            .listRowBackground(selectionBackground(for: rowID))
                     }
                 }
             }
@@ -111,6 +123,7 @@ struct Sidebar: View {
                                     .layoutPriority(1)
                             }
                         }
+                        .listRowBackground(selectionBackground(for: .tag(entry.tag)))
                         .contextMenu { tagMenuItems(entry.tag) }
                     }
                 }
@@ -155,7 +168,6 @@ struct Sidebar: View {
     private func sidebarRow<Content: View>(
         _ rowID: RowID, target: NavTarget, @ViewBuilder content: () -> Content
     ) -> some View {
-        let selected = isSelected(rowID, target: target)
         Button {
             if wantsSidebarClick() {
                 nav.openInRightSidebar(target)
@@ -174,34 +186,38 @@ struct Sidebar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // The pill is the row's background, not the content's. AppKit outlines
-        // that rect on right-click. Content sits in a further inset that
-        // `listRowInsets` cannot reach.
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(selected
-                    ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-                    : Color.clear)
-                // The row background spans the sidebar. The highlight is
-                // inset from it.
-                .padding(.horizontal, Self.selectionInset)
-        )
+    }
+
+    /// Apply this to the finished list row so the pill lines up with AppKit’s context-menu outline.
+    private func selectionBackground(for rowID: RowID) -> some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(isSelected(rowID)
+                ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+                : Color.clear)
+            .padding(.horizontal, Self.selectionInset)
     }
 
     /// A row highlights when it points at the current location — but if the
     /// page appears in several sections, only the row the user actually
     /// clicked (or Favourites first, for external navigation) lights up.
-    private func isSelected(_ rowID: RowID, target: NavTarget) -> Bool {
-        guard Self.normalize(target) == Self.normalize(nav.current) else { return false }
+    private func isSelected(_ rowID: RowID) -> Bool {
+        let current = Self.normalize(nav.current)
+        guard Self.normalize(rowTarget(rowID)) == current else { return false }
         if let lastClickedRow,
-           Self.normalize(rowTarget(lastClickedRow)) == Self.normalize(nav.current) {
+           Self.normalize(rowTarget(lastClickedRow)) == current {
             return rowID == lastClickedRow
         }
         // Navigation didn't come from the sidebar: prefer Favourites.
-        if case .recent(let key) = rowID {
-            return !app.store.config.isFavourite(key)
+        guard favouritesExpanded else { return true }
+        let config = app.store.config
+        switch rowID {
+        case .recent(let key):
+            return !config.favourites.prefix(sectionLimit).contains { PageName.key($0) == key }
+        case .tag(let tag):
+            return !config.favouriteTags.prefix(sectionLimit).contains(tag.lowercased())
+        default:
+            return true
         }
-        return true
     }
 
     private func rowTarget(_ rowID: RowID) -> NavTarget {
@@ -273,8 +289,9 @@ struct Sidebar: View {
     }
 }
 
-private struct FavouriteRows<Row: View>: View {
+struct FavouriteRows<Row: View, Selection: View>: View {
     let items: [Favourite]
+    let selection: (Favourite) -> Selection
     @ViewBuilder let row: (Favourite) -> Row
     let move: (IndexSet, Int) -> Void
 
@@ -312,6 +329,8 @@ private struct FavouriteRows<Row: View>: View {
                             move(IndexSet(integer: from), to)
                         }
                 )
+                // Drag modifiers can hide a background set on the inner button.
+                .listRowBackground(selection(item))
         }
         .onMove(perform: move)
     }
