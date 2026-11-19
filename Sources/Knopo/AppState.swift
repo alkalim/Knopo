@@ -516,6 +516,17 @@ final class AppState: ObservableObject {
         dataVersion += 1
     }
 
+    func moveFavourites(_ visible: [Favourite], from: IndexSet, to: Int) throws {
+        var reordered = visible
+        reordered.move(fromOffsets: from, toOffset: to)
+        let shown = Set(visible)
+        try store.updateConfig { config in
+            let hidden = config.orderedFavourites.filter { !shown.contains($0) }
+            config.orderedFavourites = reordered + hidden
+        }
+        dataVersion += 1
+    }
+
     // MARK: - Graph display settings
 
     var journalDateFormat: JournalDateFormat { preferences.defaultDateFormat }
@@ -590,10 +601,6 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Derived lists (sidebar)
-
-    var favourites: [String] { store.config.favourites }
-
-    var favouriteTags: [String] { store.config.favouriteTags }
 
     var recents: [String] {
         let keys = (try? store.cache.recentPageKeys()) ?? []

@@ -1,13 +1,20 @@
 import Foundation
 
+public enum Favourite: Hashable, Sendable {
+    case page(String)
+    case tag(String)
+}
+
 /// `.knopo/config.json` — favourites and user settings (SPEC §4.1, §11.1).
 /// Authoritative (not rebuildable), unlike `cache.db`.
 public struct GraphConfig: Codable, Equatable, Sendable {
     /// Ordered list of favourite page display names.
-    public var favourites: [String] = []
+    public private(set) var favourites: [String] = []
     /// Ordered list of favourite tag names (normalized lowercase). Tags are
     /// labels, not pages (§8), so they favourite into their own list.
-    public var favouriteTags: [String] = []
+    public private(set) var favouriteTags: [String] = []
+    /// Tag offsets in the combined list. Older graphs put all pages first.
+    private var favouriteTagPositions: [Int] = []
     /// Legacy per-graph journal date format. Decoded for the one-time migration
     /// to app preferences, but deliberately no longer encoded - the format is a
     /// viewing choice, so two windows must not render one date two ways.
@@ -29,7 +36,7 @@ public struct GraphConfig: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case favourites, favouriteTags, rightPanes, rightPaneFraction
+        case favourites, favouriteTags, favouriteTagPositions, rightPanes, rightPaneFraction
         case allPagesCollapsedSections
         case legacyTheme = "theme"
         case legacyDateFormat = "dateFormat"
@@ -43,6 +50,7 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         favourites = try c.decodeIfPresent([String].self, forKey: .favourites) ?? []
         favouriteTags = try c.decodeIfPresent([String].self, forKey: .favouriteTags) ?? []
+        favouriteTagPositions = try c.decodeIfPresent([Int].self, forKey: .favouriteTagPositions) ?? []
         if let raw = try? c.decode(String.self, forKey: .legacyDateFormat),
            let decodedFormat = JournalDateFormat(validating: raw) {
             legacyDateFormat = decodedFormat
@@ -60,6 +68,7 @@ public struct GraphConfig: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(favourites, forKey: .favourites)
         try c.encode(favouriteTags, forKey: .favouriteTags)
+        try c.encode(favouriteTagPositions, forKey: .favouriteTagPositions)
         try c.encode(rightPanes, forKey: .rightPanes)
         try c.encodeIfPresent(rightPaneFraction, forKey: .rightPaneFraction)
         try c.encode(allPagesCollapsedSections, forKey: .allPagesCollapsedSections)
@@ -84,17 +93,46 @@ public struct GraphConfig: Codable, Equatable, Sendable {
 
     // MARK: Favourites
 
+    public func orderedFavourites(limitPerKind limit: Int) -> [Favourite] {
+        var pages = favourites.prefix(limit)
+        var tags = favouriteTags.prefix(limit)
+        let tagPositions = Set(favouriteTagPositions.prefix(limit))
+        return (0..<(pages.count + tags.count)).map { index in
+            if (pages.isEmpty || tagPositions.contains(index)), let tag = tags.popFirst() {
+                return .tag(tag)
+            }
+            return .page(pages.removeFirst())
+        }
+    }
+
+    public var orderedFavourites: [Favourite] {
+        get { orderedFavourites(limitPerKind: .max) }
+        set {
+            favourites.removeAll(keepingCapacity: true)
+            favouriteTags.removeAll(keepingCapacity: true)
+            favouriteTagPositions.removeAll(keepingCapacity: true)
+            for (index, item) in newValue.enumerated() {
+                switch item {
+                case .page(let name):
+                    favourites.append(name)
+                case .tag(let tag):
+                    favouriteTagPositions.append(index)
+                    favouriteTags.append(tag)
+                }
+            }
+        }
+    }
+
     public func isFavourite(_ pageName: String) -> Bool {
         let key = PageName.key(pageName)
         return favourites.contains { PageName.key($0) == key }
     }
 
     public mutating func toggleFavourite(_ pageName: String) {
-        let key = PageName.key(pageName)
-        if let idx = favourites.firstIndex(where: { PageName.key($0) == key }) {
-            favourites.remove(at: idx)
+        if isFavourite(pageName) {
+            removeFavourite(pageName)
         } else {
-            favourites.append(pageName)
+            orderedFavourites.append(.page(pageName))
         }
     }
 
@@ -107,7 +145,10 @@ public struct GraphConfig: Codable, Equatable, Sendable {
 
     public mutating func removeFavourite(_ pageName: String) {
         let key = PageName.key(pageName)
-        favourites.removeAll { PageName.key($0) == key }
+        orderedFavourites.removeAll { item in
+            guard case .page(let name) = item else { return false }
+            return PageName.key(name) == key
+        }
     }
 
     // MARK: Favourite tags
@@ -118,16 +159,20 @@ public struct GraphConfig: Codable, Equatable, Sendable {
 
     public mutating func toggleFavouriteTag(_ tag: String) {
         let key = tag.lowercased()
-        if let idx = favouriteTags.firstIndex(of: key) {
-            favouriteTags.remove(at: idx)
+        if isFavouriteTag(key) {
+            orderedFavourites.removeAll { $0 == .tag(key) }
         } else {
-            favouriteTags.append(key)
+            orderedFavourites.append(.tag(key))
         }
     }
 
     public mutating func renameFavouriteTag(from oldTag: String, to newTag: String) {
         let old = oldTag.lowercased()
         let new = newTag.lowercased()
+        if old != new, isFavouriteTag(new) {
+            orderedFavourites.removeAll { $0 == .tag(old) }
+            return
+        }
         for i in favouriteTags.indices where favouriteTags[i] == old {
             favouriteTags[i] = new
         }

@@ -145,7 +145,7 @@ struct PreferencesTests {
         #expect(preferences.defaultDateFormat.rawValue == "d MMM yyyy")
 
         // And the key stops being written: saving drops it from both graphs.
-        try secondApp.store.updateConfig { $0.favourites = ["Home"] }
+        try secondApp.store.updateConfig { $0.toggleFavourite("Home") }
         let saved = try String(contentsOf: secondApp.store.configURL, encoding: .utf8)
         #expect(!saved.contains("dateFormat"))
     }
@@ -189,12 +189,12 @@ struct PreferencesTests {
         store.updatePage(present)
         try store.savePage(named: present.name)
         try store.updateConfig {
-            $0.favourites = ["Present", "Deleted"]
+            $0.orderedFavourites = [.page("Deleted"), .tag("mark"), .page("Present")]
         }
         let app = AppState(store: store, preferences: preferences)
 
         try await app.rebuildIndex()
 
-        #expect(app.store.config.favourites == ["Present"])
+        #expect(app.store.config.orderedFavourites == [.tag("mark"), .page("Present")])
     }
 }

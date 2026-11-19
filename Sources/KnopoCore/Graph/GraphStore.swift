@@ -175,11 +175,15 @@ public final class GraphStore {
     public func pruneStaleFavourites(onDisk: Set<String>) {
         // A favourite may point at a journal stub (today), so only drop ones
         // that are neither on disk nor valid journal dates.
-        let before = config.favourites
-        config.favourites.removeAll { name in
-            !onDisk.contains(PageName.key(name)) && JournalDate(pageName: name) == nil
+        let missing = Set(config.favourites.filter {
+            !onDisk.contains(PageName.key($0)) && JournalDate(pageName: $0) == nil
+        })
+        guard !missing.isEmpty else { return }
+        config.orderedFavourites.removeAll { item in
+            guard case .page(let name) = item else { return false }
+            return missing.contains(name)
         }
-        if config.favourites != before { try? saveConfig() }
+        try? saveConfig()
     }
 
     /// Shared file synchronization for startup, external force-sync, and the

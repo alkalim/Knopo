@@ -471,9 +471,9 @@ The reference index updates with the page (same cadence) and on external file ch
 ### 11.1 Favourites
 
 - Any page (including journal pages) can be favourited via its page menu or sidebar context menu.
-- **Tags can be favourited too**: favourite tags are stored separately from page favourites and navigate to the tag view. In the sidebar Favourites section, pages and tags are distinguished by icon (a document for pages, a hash for tags) rather than a star.
-- Favourites appear as a reorderable (drag-and-drop) list at the top of the left sidebar (pages and tags reorder within their own groups).
-- Persisted in `config.json` and survive cache deletion: page favourites as an ordered list of page names, tag favourites as an ordered list of tag names. A favourite whose page/tag is renamed follows the rename; a favourite whose page is deleted is removed.
+- Pages have a document icon and tags have a hash icon.
+- Pages and tags share one list at the top of the left sidebar. Drag any favourite above or below any other favourite.
+- The graph saves the order in `config.json` using the page names, tag names and the positions of the tags in the combined list. Older graphs start with their pages followed by their tags. The order survives cache deletion. Renaming a page or tag updates its favourite in place. Deleting a page removes its favourite.
 
 ### 11.2 Recent pages
 
@@ -485,7 +485,7 @@ The reference index updates with the page (same cadence) and on external file ch
 
 ## 12. Navigation and search
 
-- **Left sidebar**: Journal (home), Favourites, Recents, Tags, All Pages. Shown and hidden with `Ctrl+Cmd+S` or the toolbar's collapse button. The Favourites, Recents, and Tags sections are collapsible (state persisted) and capped at 15 entries each in v1. All Pages shows unnamespaced regular pages in a collapsible Pages section, followed by collapsible namespace sections, then journal pages in a final collapsible Journal section with formatted date titles and newest days first. All Pages sections start expanded, save their collapse state per graph, and temporarily reveal matching rows while filtering without changing that saved state.
+- **Left sidebar**: Journal (home), Favourites, Recents, Tags, All Pages. Shown and hidden with `Ctrl+Cmd+S` or the toolbar's collapse button. The Favourites, Recents, and Tags sections are collapsible and remember their state. Favourites shows up to 15 pages and 15 tags in their saved order. Recents and Tags each show up to 15 entries. All Pages shows unnamespaced regular pages in a collapsible Pages section, followed by collapsible namespace sections, then journal pages in a final collapsible Journal section with formatted date titles and newest days first. All Pages sections start expanded, save their collapse state per graph, and temporarily reveal matching rows while filtering without changing that saved state.
 - **Right sidebar**: stack of panes opened via `Cmd+Click` (or `Shift+Click`) on any page/block reference or sidebar entry (the Journal entry opens today's page); each pane closable; resizable divider; used for side-by-side reference work. The open panes and the dragged divider width are persisted per graph in `config.json`, so a graph reopens with its right sidebar as left. Resizing the window scales the main view and the panel proportionally (their ratio holds); once the main view is at its minimum useable width, further narrowing shrinks only the panel.
   Opening or reopening a pane moves it to the top, expands it, and scrolls it into view without taking keyboard focus. Block results scroll to the matching block instead of the pane header, falling back to the header if the block no longer matches. Each sidebar open cancels older block reveals in the sidebar.
 - **Windows**: each **window** shows one graph; different windows may show **different** graphs (e.g. a roadmap graph beside a work graph). A new window (`Cmd+N`) — or tab — starts in the graph of the window it was opened from; at launch, with none to inherit from, in the last graph opened. Any windows showing the **same** graph share its data, undo stack, and index (the store is opened once per folder, never double-opened), while each keeps its own current page, navigation history, and right-sidebar panes.

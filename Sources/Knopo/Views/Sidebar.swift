@@ -67,28 +67,23 @@ struct Sidebar: View {
                 }
             }
 
-            if !app.favourites.isEmpty || !app.favouriteTags.isEmpty {
+            let favourites = app.store.config.orderedFavourites(limitPerKind: sectionLimit)
+            if !favourites.isEmpty {
                 Section("Favourites", isExpanded: $favouritesExpanded) {
-                    // Pages use a doc icon, tags a hash, so type reads at a
-                    // glance without a star (the section says "favourite").
-                    ForEach(app.favourites.prefix(sectionLimit), id: \.self) { name in
-                        pageRow(name, rowID: .favourite(PageName.key(name)),
-                                icon: "doc.text")
-                    }
-                    .onMove { from, to in
-                        try? app.store.updateConfig {
-                            $0.favourites.move(fromOffsets: from, toOffset: to)
+                    FavouriteRows(items: favourites) { item in
+                        switch item {
+                        case .page(let name):
+                            pageRow(name, rowID: .favourite(PageName.key(name)), icon: "doc.text")
+                        case .tag(let tag):
+                            favouriteTagRow(tag)
                         }
-                        app.dataVersion += 1
-                    }
-                    ForEach(app.favouriteTags.prefix(sectionLimit), id: \.self) { tag in
-                        favouriteTagRow(tag)
-                    }
-                    .onMove { from, to in
-                        try? app.store.updateConfig {
-                            $0.favouriteTags.move(fromOffsets: from, toOffset: to)
+                    } move: { from, to in
+                        guard favourites == app.store.config.orderedFavourites(limitPerKind: sectionLimit) else { return }
+                        do {
+                            try app.moveFavourites(favourites, from: from, to: to)
+                        } catch {
+                            NSAlert(for: error).runModal()
                         }
-                        app.dataVersion += 1
                     }
                 }
             }
@@ -204,7 +199,7 @@ struct Sidebar: View {
         }
         // Navigation didn't come from the sidebar: prefer Favourites.
         if case .recent(let key) = rowID {
-            return !app.favourites.contains { PageName.key($0) == key }
+            return !app.store.config.isFavourite(key)
         }
         return true
     }
@@ -273,5 +268,65 @@ struct Sidebar: View {
 
     private func displayName(for name: String) -> String {
         app.displayTitle(for: name)
+    }
+}
+
+private struct FavouriteRows<Row: View>: View {
+    let items: [Favourite]
+    @ViewBuilder let row: (Favourite) -> Row
+    let move: (IndexSet, Int) -> Void
+
+    // Scrolling updates row positions. Only the drag needs to redraw the insertion line.
+    private final class RowFrames {
+        var byItem: [Favourite: CGRect] = [:]
+    }
+
+    @State private var frames = RowFrames()
+    @GestureState private var drag: FavouriteDrag?
+
+    var body: some View {
+        let insertion = drag?.destination(in: items, frames: frames.byItem)
+        ForEach(items, id: \.self) { item in
+            row(item)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    frames.byItem[item] = $0
+                }
+                .onDisappear { frames.byItem.removeValue(forKey: item) }
+                .overlay(alignment: insertion == items.count ? .bottom : .top) {
+                    if let insertion, (insertion == items.count ? items.last : items[insertion]) == item {
+                        Rectangle().fill(Color.accentColor).frame(height: 2)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                        .updating($drag) { value, state, _ in
+                            state = FavouriteDrag(source: item, location: value.location)
+                        }
+                        .onEnded { value in
+                            let drag = FavouriteDrag(source: item, location: value.location)
+                            guard let to = drag.destination(in: items, frames: frames.byItem),
+                                  let from = items.firstIndex(of: item) else { return }
+                            move(IndexSet(integer: from), to)
+                        }
+                )
+        }
+        .onMove(perform: move)
+    }
+}
+
+struct FavouriteDrag {
+    let source: Favourite
+    let location: CGPoint
+
+    func destination(in items: [Favourite], frames: [Favourite: CGRect]) -> Int? {
+        let rows = items.indices.compactMap { index in
+            frames[items[index]].map { (index: index, frame: $0) }
+        }
+        guard let first = rows.first, let last = rows.last,
+              first.frame.union(last.frame).contains(location),
+              let from = items.firstIndex(of: source) else { return nil }
+        let to = rows.first { location.y < $0.frame.midY }?.index ?? last.index + 1
+        return to == from || to == from + 1 ? nil : to
     }
 }

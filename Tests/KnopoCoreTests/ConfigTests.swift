@@ -28,7 +28,7 @@ import Foundation
     /// field-by-field decode must not fail the whole document.
     @Test func olderConfigLoadsWithDefaults() throws {
         let json = """
-        { "favourites": ["Home"], "theme": "dark" }
+        { "favourites": ["Home"], "favouriteTags": ["work"], "theme": "dark" }
         """
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("knopo-cfg-\(UUID().uuidString)/config.json")
@@ -37,12 +37,36 @@ import Foundation
         try Data(json.utf8).write(to: url)
 
         let loaded = GraphConfig.load(from: url)
-        expectEqual(loaded.favourites, ["Home"])
+        expectEqual(loaded.orderedFavourites, [.page("Home"), .tag("work")])
         expectEqual(loaded.legacyTheme, "dark")
         expectEqual(loaded.legacyDateFormat, .default)
         expectTrue(loaded.rightPanes.isEmpty)
         expectTrue(loaded.rightPaneFraction == nil)
         expectTrue(loaded.allPagesCollapsedSections.isEmpty)
+    }
+
+    @Test func mixedFavouritesKeepTheirPositionsThroughRenamesAndRemovals() {
+        var config = GraphConfig()
+        config.orderedFavourites = [.tag("home"), .page("Home"), .tag("work"), .page("Ideas")]
+        config.renameFavourite(from: "HOME", to: "Start")
+        config.renameFavouriteTag(from: "work", to: "projects")
+        config.toggleFavouriteTag("HOME")
+        config.toggleFavourite("Later")
+        config.removeFavourite("Start")
+        expectEqual(config.orderedFavourites, [.tag("projects"), .page("Ideas"), .page("Later")])
+        config.toggleFavouriteTag("archive")
+        config.renameFavouriteTag(from: "archive", to: "Projects")
+        expectEqual(config.orderedFavourites, [.tag("projects"), .page("Ideas"), .page("Later")])
+    }
+
+    @Test func sidebarLimitKeepsTheFirstPagesAndTagsInOrder() {
+        var config = GraphConfig()
+        config.orderedFavourites = (1...17).map { .page("P\($0)") } + (1...17).map { .tag("t\($0)") }
+        config.orderedFavourites.insert(.tag("first"), at: 1)
+        config.orderedFavourites.append(.page("last"))
+        let expected: [Favourite] = [.page("P1"), .tag("first")]
+            + (2...15).map { .page("P\($0)") } + (1...14).map { .tag("t\($0)") }
+        expectEqual(config.orderedFavourites(limitPerKind: 15), expected)
     }
 
     @Test func legacyThemeAndDateFormatAreDecodedButNotReencoded() throws {
