@@ -309,13 +309,12 @@ import KnopoCore
         let app = AppState(store: try GraphStore(root: root))
         defer { app.shutdown() }
         let session = PagePropertyEditSession()
-        let host = NSHostingView(rootView: PageMetadataView(pageName: "Test", session: session, addRequest: nil)
+        let host = NSHostingView(rootView: PageMetadataView(pageName: "Test", session: session, addRequest: UUID())
             .environmentObject(app).environmentObject(Navigator(app: app)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 800),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
         defer { session.leave(); window.contentView = nil }
-        session.begin(app: app, pageName: "Test", index: 0, inserting: true)
         func settle() async throws {
             for _ in 0..<4 {
                 window.layoutIfNeeded()
@@ -324,6 +323,8 @@ import KnopoCore
         }
         try await settle()
         let editor = try #require(window.firstResponder as? PagePropertyTextView)
+        #expect(editor.string.isEmpty)
+        #expect(editor.accessibilityPlaceholderValue() == String(localized: "property:: value"))
         let layout = try #require(editor.textLayoutManager)
         for source in ["status:: open", "description:: " + String(repeating: "**bold** `code` 👩🏽‍💻 中文 ", count: 8), "# unfinished property"] {
             editor.insertText(source, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))

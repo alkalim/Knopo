@@ -189,6 +189,7 @@ insert image
 insert link
 live query
 pick a date
+property:: value	Example page property. Translate both words and keep the double colon.
 showing %lld of %lld	Query result footer: how many of the matches are listed
 stub
 “%@” exceeds the %lld MB import limit.	Asset import error; filename and maximum size in decimal megabytes

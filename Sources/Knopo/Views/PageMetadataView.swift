@@ -86,10 +86,24 @@ struct PageMetadataView: View {
     }
 
     private var editor: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            PagePropertyEditor(session: session, font: BlockEditorTextView.editorFont, fetchTags: { prefix in
+        let font = BlockEditorTextView.editorFont
+        let placeholder = String(localized: "property:: value",
+                                 comment: "Example page property. Translate both words and keep the double colon.")
+        return VStack(alignment: .leading, spacing: 2) {
+            PagePropertyEditor(session: session, font: font, placeholder: placeholder, fetchTags: { prefix in
                 (try? app.store.cache.tags(withPrefix: prefix)) ?? []
             })
+            .overlay(alignment: .leading) {
+                if session.text.isEmpty {
+                    Text(verbatim: placeholder)
+                        .font(Font(font))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .padding(.leading, 2)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .id(session.revision)
             if let error = session.error {
                 Text(verbatim: error).font(.caption).foregroundStyle(.secondary)
@@ -375,6 +389,7 @@ final class PagePropertyEditSession: ObservableObject {
 private struct PagePropertyEditor: NSViewRepresentable {
     @ObservedObject var session: PagePropertyEditSession
     let font: NSFont
+    let placeholder: String
     var fetchTags: (String) -> [String]
 
     func makeNSView(context: Context) -> PagePropertyTextView {
@@ -394,6 +409,7 @@ private struct PagePropertyEditor: NSViewRepresentable {
         view.isAutomaticTextReplacementEnabled = false
         view.autocomplete.pagePropertyEditing = true
         view.setAccessibilityLabel(L("Page Property"))
+        view.setAccessibilityPlaceholderValue(placeholder)
         view.string = session.text
         view.session = session
         view.revision = session.revision
