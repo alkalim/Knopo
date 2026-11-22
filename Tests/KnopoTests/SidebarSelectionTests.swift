@@ -40,6 +40,8 @@ import KnopoCore
         // With one favourite, one recent and no tags, the recent is the last row.
         let recent = list.numberOfRows - 1
         try #require(favourite < recent)
+        let history = nav.backTitles
+        list.selectRowIndexes(IndexSet(integer: journal), byExtendingSelection: false)
         list.selectRowIndexes(IndexSet(integer: recent), byExtendingSelection: false)
         // Reopening Favourites must leave the selected copy in Recents.
         let count = list.numberOfRows
@@ -48,12 +50,21 @@ import KnopoCore
         defaults.set(true, forKey: "sidebar.favouritesExpanded")
         try await waitUntil { list.numberOfRows == count }
         #expect(list.selectedRowIndexes == IndexSet(integer: recent))
+        #expect(nav.backTitles == history)
         list.selectRowIndexes(IndexSet(integer: favourite), byExtendingSelection: false)
         try await waitUntil { nav.current == .page(name: page.name) }
         #expect(list.selectedRowIndexes == IndexSet(integer: favourite))
         list.selectRowIndexes(IndexSet(integer: journal), byExtendingSelection: false)
+        host.layoutSubtreeIfNeeded()
+        #expect(list.selectedRow == journal)
+        #expect(nav.current == .page(name: page.name))
         try await waitUntil { nav.current == .journalHome }
         nav.goBack()
         try await waitUntil { list.selectedRowIndexes == IndexSet(integer: favourite) }
+
+        list.selectRowIndexes(IndexSet(integer: journal), byExtendingSelection: false)
+        nav.navigate(to: .allPages)
+        try await waitUntil { list.selectedRow == journal + 1 }
+        #expect(nav.current == .allPages)
     }
 }

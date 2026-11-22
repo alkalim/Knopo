@@ -13,6 +13,7 @@ struct Sidebar: View {
     /// The specific row the user last clicked, so a page living in several
     /// sections highlights only where it was selected.
     @State private var lastClickedRow: RowID?
+    @State private var pendingRow: RowID?
     @FocusState private var sidebarFocused: Bool
 
     /// Recents as displayed: stable order while clicking around (no
@@ -142,6 +143,7 @@ struct Sidebar: View {
                 self.lastClickedRow = nil
             }
         }
+        .onDisappear { pendingRow = nil }
         .onAppear { mergeRecents() }
         .onChange(of: app.dataVersion) { _, _ in mergeRecents() }
     }
@@ -188,11 +190,30 @@ struct Sidebar: View {
             nav.openInRightSidebar(rowTarget(row))
             return
         }
+        let target = rowTarget(row)
+        let origin = nav.current
         lastClickedRow = row
-        nav.navigate(to: rowTarget(row))
+        guard target != origin else {
+            pendingRow = nil
+            return
+        }
+        guard pendingRow != row else { return }
+        pendingRow = row
+
+        // Let AppKit submit the selection highlight before laying out the destination.
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue,
+                                                          false, CFIndex.max) { _, _ in
+            DispatchQueue.main.async {
+                guard pendingRow == row else { return }
+                pendingRow = nil
+                if nav.current == origin { nav.navigate(to: target) }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
     }
 
     private var selectedRow: RowID? {
+        if let pendingRow { return pendingRow }
         let current = Self.normalize(nav.current)
         let favourites = favouritesExpanded
             ? app.store.config.orderedFavourites(limitPerKind: sectionLimit).map(RowID.init(favourite:)) : []
