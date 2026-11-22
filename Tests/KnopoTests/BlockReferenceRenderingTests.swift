@@ -5,6 +5,45 @@ import KnopoCore
 
 @MainActor
 @Suite struct BlockReferenceRenderingTests {
+    @Test func taskReferenceCheckboxFitsTheHostFontAndKeepsUnchangedRowsEqual() throws {
+        let id = UUID()
+        let context = BlockRenderer.Context(resolveBlockRef: { _ in "TODO task" })
+        let heading = "# ((\(id)))"
+        let rendered = BlockRenderer.render(content: heading, context: context)
+        #expect(rendered.isEqual(to: BlockRenderer.render(content: heading, context: context)))
+        let checkbox = try #require(rendered.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        let body = BlockRenderer.render(content: "((\(id)))", context: context)
+        let bodyCheckbox = try #require(body.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        #expect(checkbox.bounds.height > bodyCheckbox.bounds.height)
+    }
+
+    @Test func clickingReferencedTaskCheckboxTogglesItsSource() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        var page = try store.createPage(named: "Tasks")
+        page.blocks[0].content = "TODO buy milk"
+        store.updatePage(page)
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let nav = Navigator(app: app)
+        let originalLocation = nav.current
+        let id = page.blocks[0].id
+        for expected in ["DONE buy milk", "TODO buy milk"] {
+            let reference = BlockRenderer.render(content: "((\(id)))",
+                context: BlockResultList.renderContext(app))
+            try #require(reference.string == "\u{FFFC} buy milk")
+            #expect(reference.attribute(.attachment, at: 0, effectiveRange: nil) is NSTextAttachment)
+            let toggle = try #require(reference.attribute(.link, at: 0, effectiveRange: nil) as? URL)
+            #expect(reference.attribute(.link, at: 2, effectiveRange: nil) as? URL == KnopoURL.block(id))
+            nav.openURL(toggle)
+            #expect(app.document(for: page.name).blocks[0].content == expected)
+            #expect(nav.current == originalLocation)
+        }
+        app.undo()
+        #expect(app.document(for: page.name).blocks[0].content == "DONE buy milk")
+    }
+
     @Test(arguments: 1...6)
     func headingsUseInlineFormattingAndTheHostLink(level: Int) throws {
         let id = UUID()

@@ -2879,7 +2879,7 @@ final class OutlineEditorController: NSObject {
                 self?.showContextMenu(for: id, event: event, in: view)
             },
             openLink: { [weak self] url, inSidebar in
-                self?.handleLink(url, blockID: id, inSidebar: inSidebar)
+                self?.nav.openURL(url, inSidebar: inSidebar, sourceBlockID: id)
             },
             focusContent: { [weak self] renderedIndex in
                 self?.focusFromClick(id, renderedIndex: renderedIndex)
@@ -2915,23 +2915,6 @@ final class OutlineEditorController: NSObject {
         app.commit(doc)
         reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
             ? editor.selectedRange() : nil, folding: true)
-    }
-
-    private func handleLink(_ url: URL, blockID: UUID, inSidebar: Bool) {
-        // The rendered TODO/DONE checkbox carries this URL (SPEC §5.2). In a
-        // query result or embed it names the source block via `?block=`;
-        // otherwise it's the clicked row's own block.
-        if url.scheme == "knopo", url.host == "toggle-todo" {
-            let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first { $0.name == "block" }?
-                .value.flatMap { UUID(uuidString: $0) } ?? blockID
-            if app.toggleTodo(blockID: target) {
-                reloadAndFocus(focusedBlockID, selection: focusedBlockID != nil
-                    ? editor.selectedRange() : nil)
-            }
-            return
-        }
-        nav.openURL(url, inSidebar: inSidebar)
     }
 
     private func resizeImage(_ id: UUID, imageIndex: Int, width: CGFloat) {

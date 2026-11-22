@@ -362,8 +362,9 @@ whitespace in between. An entry with other trailing text is ignored.
 
 - A `((uuid))` renders as the **live content of the referenced block** (transcluded), visually distinguished (dotted underline). Children of the referenced block are not transcluded.
 - Inline references show the first line without heading markers, retaining inline formatting at the surrounding text size. Search, autocomplete, and breadcrumb previews also omit heading markers. Markdown source keeps its heading markers. Full blocks and embeds retain heading styling.
-- A reference acts as one link. Inner page refs, tags, and URLs use the surrounding text colour, without tag pills or external-link arrows. Images show their alt text, or just the filename when alt text is empty.
-- Click navigates to the source block (its page, zoomed to the block). The transcluded text is not editable in place in v1.
+- A referenced TODO or DONE block shows its checkbox inline. Clicking the checkbox toggles the source task in one undo step.
+- The reference text acts as one link. Inner page refs, tags, and URLs use the surrounding text colour, without tag pills or external-link arrows. Images show their alt text, or just the filename when alt text is empty.
+- Clicking the text navigates to the source block (its page, zoomed to the block). The transcluded text is not editable in place in v1.
 - Visible references refresh when the source edit is saved, including while another block is being edited. The refresh preserves the active editor and caret.
 
 ### 7.3 Broken references

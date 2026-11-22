@@ -462,13 +462,13 @@ enum BlockRenderer {
     static var lineSpacing: CGFloat { 6 * zoom * density }
     /// Emoji render this much smaller than surrounding text.
     static let emojiScale: CGFloat = 0.9
-    /// The TODO/DONE checkbox, drawn as a text attachment with exact bounds so
-    /// it fits inside the pinned line box. The previous oversized `☐` glyph
-    /// (1.33× the text font) had an ascent taller than the line: it pushed the
-    /// first line's baseline down (misaligning the bullet), hung below the
-    /// text band, and grew the row height past the pinned metrics.
-    static func todoCheckbox(done: Bool, blockID: UUID? = nil) -> NSAttributedString {
-        let font = baseFont()
+    // Reusing the attachment lets unchanged task references compare equal on refresh.
+    private static let checkedBoxes = NSCache<NSFont, NSTextAttachment>()
+    private static let uncheckedBoxes = NSCache<NSFont, NSTextAttachment>()
+
+    private static func todoAttachment(done: Bool, font: NSFont) -> NSTextAttachment {
+        let cache = done ? checkedBoxes : uncheckedBoxes
+        if let attachment = cache.object(forKey: font) { return attachment }
         let side = (font.capHeight * 1.3).rounded()
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
             let color: NSColor = done ? .secondaryLabelColor : .controlAccentColor
@@ -499,7 +499,12 @@ enum BlockRenderer {
         attachment.bounds = CGRect(
             x: 0, y: ((font.capHeight - side) / 2).rounded(), width: side, height: side
         )
-        let out = NSMutableAttributedString(attachment: attachment)
+        cache.setObject(attachment, forKey: font)
+        return attachment
+    }
+
+    static func todoCheckbox(done: Bool, blockID: UUID? = nil, font: NSFont = baseFont()) -> NSMutableAttributedString {
+        let out = NSMutableAttributedString(attachment: todoAttachment(done: done, font: font))
         out.append(NSAttributedString(string: " ", attributes: [.font: font]))
         // Carry the block id when known so a click in a query result / embed
         // toggles the right block, not whatever the surrounding row links to.
@@ -1227,7 +1232,17 @@ enum BlockRenderer {
                     inner.resolveEmbed = { _ in nil }
                     inner.resolveQuery = { _ in nil }
                     let preview = NSMutableAttributedString()
-                    appendNodes(InlineParser.parse(previewSource(resolved)), to: preview,
+                    var text = previewSource(resolved)
+                    if let todo = TodoState(content: resolved) {
+                        let checkbox = todoCheckbox(done: todo == .done, blockID: id, font: font)
+                        if let sourceOffset {
+                            checkbox.addAttribute(sourceOffsetKey, value: sourceOffset,
+                                                  range: NSRange(location: 0, length: checkbox.length))
+                        }
+                        out.append(checkbox)
+                        text = String(text.dropFirst(todo.rawValue.count)).trimmingCharacters(in: .whitespaces)
+                    }
+                    appendNodes(InlineParser.parse(text), to: preview,
                                 font: font, color: color, strike: strike, highlight: highlight,
                                 sourceOffset: nil, context: inner, imageIndex: &imageIndex)
                     let range = NSRange(location: 0, length: preview.length)

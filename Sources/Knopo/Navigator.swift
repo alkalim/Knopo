@@ -287,7 +287,15 @@ final class Navigator: ObservableObject {
 
     /// Handles a click on any rendered link: internal targets navigate,
     /// external URLs open in the system browser (SPEC §5.1).
-    func openURL(_ url: URL, inSidebar: Bool = false) {
+    func openURL(_ url: URL, inSidebar: Bool = false, sourceBlockID: UUID? = nil) {
+        if url.scheme == "knopo", url.host == "toggle-todo" {
+            let block = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "block" }
+            if let id = block?.value.flatMap(UUID.init(uuidString:)) ?? sourceBlockID {
+                app.toggleTodo(blockID: id)
+            }
+            return
+        }
         guard let target = KnopoURL.decode(url) else {
             NSWorkspace.shared.open(url)
             return
