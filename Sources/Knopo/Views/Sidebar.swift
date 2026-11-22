@@ -3,7 +3,6 @@ import KnopoCore
 
 /// Left sidebar: Journal (home), Favourites, Recents, Tags, All Pages (SPEC §12).
 ///
-/// Selection uses a grey rounded pill with a normal label, tracked per row.
 /// Selecting a page in Favourites does not also highlight it in Recents.
 struct Sidebar: View {
     @EnvironmentObject var app: AppState
@@ -14,6 +13,7 @@ struct Sidebar: View {
     /// The specific row the user last clicked, so a page living in several
     /// sections highlights only where it was selected.
     @State private var lastClickedRow: RowID?
+    @FocusState private var sidebarFocused: Bool
 
     /// Recents as displayed: stable order while clicking around (no
     /// jump-to-top mid-session); new pages enter at the top, gone ones drop.
@@ -29,14 +29,14 @@ struct Sidebar: View {
     enum RowID: Hashable {
         case journal
         case allPages
-        case favourite(String)    // page key
+        case favourite(String)
         case favouriteTag(String) // tag
-        case recent(String)       // page key
+        case recent(String)
         case tag(String)
 
         init(favourite: Favourite) {
             switch favourite {
-            case .page(let name): self = .favourite(PageName.key(name))
+            case .page(let name): self = .favourite(name)
             case .tag(let tag): self = .favouriteTag(tag)
             }
         }
@@ -45,12 +45,12 @@ struct Sidebar: View {
     var body: some View {
         // Reading dataVersion ties this view to index changes.
         let _ = app.dataVersion
-        List {
+        List(selection: Binding(get: { selectedRow }, set: selectRow)) {
             Section {
-                sidebarRow(.journal, target: .journalHome) {
+                sidebarRow(.journal) {
                     Label(SectionName.journal, systemImage: "calendar").lineLimit(1)
                 }
-                .listRowBackground(selectionBackground(for: .journal))
+                .tag(RowID.journal)
                 .contextMenu {
                     Button("Jump to Day…") {
                         journalJumpDate = Date()
@@ -70,21 +70,19 @@ struct Sidebar: View {
                         nav.navigate(to: .page(name: JournalDate(date: newValue).pageName))
                     }
                 }
-                sidebarRow(.allPages, target: .allPages) {
+                sidebarRow(.allPages) {
                     Label(SectionName.allPages, systemImage: "doc.on.doc").lineLimit(1)
                 }
-                .listRowBackground(selectionBackground(for: .allPages))
+                .tag(RowID.allPages)
             }
 
             let favourites = app.store.config.orderedFavourites(limitPerKind: sectionLimit)
             if !favourites.isEmpty {
                 Section("Favourites", isExpanded: $favouritesExpanded) {
-                    FavouriteRows(items: favourites, selection: { item in
-                        selectionBackground(for: RowID(favourite: item))
-                    }) { item in
+                    FavouriteRows(items: favourites) { item in
                         switch item {
                         case .page(let name):
-                            pageRow(name, rowID: RowID(favourite: item), icon: "doc.text")
+                            pageRow(name, rowID: .favourite(name), icon: "doc.text")
                         case .tag(let tag):
                             favouriteTagRow(tag)
                         }
@@ -102,9 +100,9 @@ struct Sidebar: View {
             if !recentsDisplay.isEmpty {
                 Section("Recents", isExpanded: $recentsExpanded) {
                     ForEach(recentsDisplay.prefix(sectionLimit), id: \.self) { name in
-                        let rowID = RowID.recent(PageName.key(name))
+                        let rowID = RowID.recent(name)
                         pageRow(name, rowID: rowID, icon: "clock")
-                            .listRowBackground(selectionBackground(for: rowID))
+                            .tag(rowID)
                     }
                 }
             }
@@ -113,7 +111,7 @@ struct Sidebar: View {
             if !tags.isEmpty {
                 Section("Tags", isExpanded: $tagsExpanded) {
                     ForEach(tags.prefix(sectionLimit), id: \.tag) { entry in
-                        sidebarRow(.tag(entry.tag), target: .tag(entry.tag)) {
+                        sidebarRow(.tag(entry.tag)) {
                             HStack {
                                 rowLabel(entry.tag, icon: "number")
                                 Spacer(minLength: 4)
@@ -123,13 +121,15 @@ struct Sidebar: View {
                                     .layoutPriority(1)
                             }
                         }
-                        .listRowBackground(selectionBackground(for: .tag(entry.tag)))
+                        .tag(RowID.tag(entry.tag))
                         .contextMenu { tagMenuItems(entry.tag) }
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .listItemTint(.monochrome)
+        .focused($sidebarFocused)
         .transaction { transaction in
             if !app.preferences.animationsEnabled {
                 transaction.animation = nil
@@ -137,6 +137,11 @@ struct Sidebar: View {
             }
         }
         .frame(maxHeight: .infinity)
+        .onChange(of: nav.current) { _, target in
+            if let lastClickedRow, Self.normalize(rowTarget(lastClickedRow)) != Self.normalize(target) {
+                self.lastClickedRow = nil
+            }
+        }
         .onAppear { mergeRecents() }
         .onChange(of: app.dataVersion) { _, _ in mergeRecents() }
     }
@@ -159,72 +164,58 @@ struct Sidebar: View {
 
     // MARK: - Rows and selection
 
-    /// How far AppKit insets a source-list row's selection from the row width.
-    /// It draws the right-click outline there too. `SidebarSelectionInsetTests`
-    /// measures it, so a system that changes it fails that test.
-    static let selectionInset: CGFloat = 10
-
-    @ViewBuilder
     private func sidebarRow<Content: View>(
-        _ rowID: RowID, target: NavTarget, @ViewBuilder content: () -> Content
+        _ row: RowID, @ViewBuilder content: () -> Content
     ) -> some View {
         Button {
-            if wantsSidebarClick() {
-                nav.openInRightSidebar(target)
-            } else {
-                lastClickedRow = rowID
-                nav.navigate(to: target)
-            }
+            sidebarFocused = true
+            selectRow(row)
         } label: {
             content()
-                .foregroundStyle(Color.primary)
                 .padding(.horizontal, 7)
-                // Standard macOS sidebar row height (Photos/Music): 28 pt,
-                // pill filling the full row.
-                .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28,
-                       alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .highPriorityGesture(TapGesture().modifiers(.command).onEnded { nav.openInRightSidebar(rowTarget(row)) })
+        .highPriorityGesture(TapGesture().modifiers(.shift).onEnded { nav.openInRightSidebar(rowTarget(row)) })
     }
 
-    /// Apply this to the finished list row so the pill lines up with AppKit’s context-menu outline.
-    private func selectionBackground(for rowID: RowID) -> some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(isSelected(rowID)
-                ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-                : Color.clear)
-            .padding(.horizontal, Self.selectionInset)
+    private func selectRow(_ row: RowID?) {
+        guard let row else { return }
+        if let event = NSApp.currentEvent, [.leftMouseDown, .leftMouseUp].contains(event.type),
+           !event.modifierFlags.intersection([.command, .shift]).isEmpty {
+            nav.openInRightSidebar(rowTarget(row))
+            return
+        }
+        lastClickedRow = row
+        nav.navigate(to: rowTarget(row))
     }
 
-    /// A row highlights when it points at the current location — but if the
-    /// page appears in several sections, only the row the user actually
-    /// clicked (or Favourites first, for external navigation) lights up.
-    private func isSelected(_ rowID: RowID) -> Bool {
+    private var selectedRow: RowID? {
         let current = Self.normalize(nav.current)
-        guard Self.normalize(rowTarget(rowID)) == current else { return false }
-        if let lastClickedRow,
-           Self.normalize(rowTarget(lastClickedRow)) == current {
-            return rowID == lastClickedRow
-        }
-        // Navigation didn't come from the sidebar: prefer Favourites.
-        guard favouritesExpanded else { return true }
-        let config = app.store.config
-        switch rowID {
-        case .recent(let key):
-            return !config.favourites.prefix(sectionLimit).contains { PageName.key($0) == key }
+        let favourites = favouritesExpanded
+            ? app.store.config.orderedFavourites(limitPerKind: sectionLimit).map(RowID.init(favourite:)) : []
+        let favourite = favourites.first { Self.normalize(rowTarget($0)) == current }
+        let alternate: RowID?
+        switch current {
+        case .journalHome: return .journal
+        case .allPages: return .allPages
+        case .page(let key, _):
+            alternate = recentsExpanded ? recentsDisplay.prefix(sectionLimit)
+                .first { PageName.key($0) == key }.map(RowID.recent) : nil
         case .tag(let tag):
-            return !config.favouriteTags.prefix(sectionLimit).contains(tag.lowercased())
-        default:
-            return true
+            alternate = tagsExpanded ? .tag(tag) : nil
         }
+        if let alternate, alternate == lastClickedRow { return alternate }
+        return favourite ?? alternate
     }
 
     private func rowTarget(_ rowID: RowID) -> NavTarget {
         switch rowID {
         case .journal: return .journalHome
         case .allPages: return .allPages
-        case .favourite(let key), .recent(let key): return .page(name: key)
+        case .favourite(let name), .recent(let name): return .page(name: name)
         case .tag(let tag), .favouriteTag(let tag): return .tag(tag)
         }
     }
@@ -253,7 +244,7 @@ struct Sidebar: View {
     private func pageRow(
         _ name: String, rowID: RowID, icon: String
     ) -> some View {
-        sidebarRow(rowID, target: .page(name: name)) {
+        sidebarRow(rowID) {
             rowLabel(displayName(for: name), icon: icon)
         }
         .contextMenu {
@@ -268,7 +259,7 @@ struct Sidebar: View {
     /// A favourited tag row — same target as a Tags-section row, hash-iconed
     /// to read as a tag among the doc-iconed page favourites.
     private func favouriteTagRow(_ tag: String) -> some View {
-        sidebarRow(.favouriteTag(tag), target: .tag(tag)) {
+        sidebarRow(.favouriteTag(tag)) {
             rowLabel(tag, icon: "number")
         }
         .contextMenu { tagMenuItems(tag) }
@@ -289,9 +280,8 @@ struct Sidebar: View {
     }
 }
 
-struct FavouriteRows<Row: View, Selection: View>: View {
+struct FavouriteRows<Row: View>: View {
     let items: [Favourite]
-    let selection: (Favourite) -> Selection
     @ViewBuilder let row: (Favourite) -> Row
     let move: (IndexSet, Int) -> Void
 
@@ -329,8 +319,7 @@ struct FavouriteRows<Row: View, Selection: View>: View {
                             move(IndexSet(integer: from), to)
                         }
                 )
-                // Drag modifiers can hide a background set on the inner button.
-                .listRowBackground(selection(item))
+                .tag(Sidebar.RowID(favourite: item))
         }
         .onMove(perform: move)
     }
