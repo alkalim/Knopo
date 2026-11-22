@@ -65,6 +65,64 @@ import KnopoCore
         return Double(value.tv_sec) + Double(value.tv_nsec) / 1_000_000_000
     }
 
+    @Test(arguments: [false, true])
+    func historyReturnsToReadingBlock(forward: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try GraphStore(root: root)
+        var page = store.page(named: "Notes")
+        page.blocks = (0..<50).map { Block(content: "Note \($0)") }
+        store.updatePage(page)
+        let app = AppState(store: store)
+        defer { app.shutdown() }
+        let target = NavTarget.page(name: page.name)
+        let nav = Navigator(app: app, initialTarget: .allPages)
+        nav.navigate(to: target)
+        let host = NSHostingView(rootView: MainWindow().environmentObject(app).environmentObject(nav))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 400),
+                              styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+
+        func settle() async throws {
+            for _ in 0..<10 {
+                window.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        func outline() throws -> (OutlineTableView, NSScrollView) {
+            let table = try #require(descendants(host, OutlineTableView.self).first)
+            return (table, try #require(table.enclosingScrollView))
+        }
+        try await settle()
+        let (table, scroll) = try outline()
+        let row = 25
+        let y = table.convert(table.rect(ofRow: row), to: scroll.documentView).minY
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y + 2 - scroll.contentInsets.top))
+        if forward { nav.goBack() } else { nav.navigate(to: .allPages) }
+        try await settle()
+        if forward {
+            page.blocks = page.blocks.map { Block(content: $0.content) }
+        } else {
+            page.blocks.insert(Block(content: "Inserted while away"), at: 0)
+        }
+        store.updatePage(page)
+        if forward { nav.goForward() } else { nav.goBack() }
+        try await settle()
+        let (returned, viewport) = try outline()
+        let restoredRow = forward ? row : row + 1
+        let restoredY = returned.convert(returned.rect(ofRow: restoredRow), to: viewport.documentView).minY
+        #expect(abs(restoredY - viewport.contentView.bounds.minY - viewport.contentInsets.top) <= 1)
+        #expect((returned.delegate as? OutlineEditorController)?.flashedBlockID == nil)
+
+        nav.navigate(to: .allPages)
+        try await settle()
+        nav.navigate(to: target)
+        try await settle()
+        let (_, fresh) = try outline()
+        #expect(abs(fresh.contentView.bounds.minY + fresh.contentInsets.top) <= 1)
+    }
+
     @Test func journalOpensAboveToolbarInsetWithoutTakingFocus() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("knopo-feed-origin-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }

@@ -68,6 +68,33 @@ final class Navigator: ObservableObject {
     /// journal home has several).
     let find = FindCoordinator()
 
+    private weak var mainOutline: OutlineEditorController?
+    private var readingPositions: [(target: NavTarget, anchor: OutlineEditorController.BlockAnchor)] = []
+    private var returningTo: NavTarget?
+
+    private func changeDestination(to destination: NavTarget, fromHistory: Bool) {
+        if let outline = mainOutline,
+           current.showsSame(as: .page(name: outline.pageName, zoom: outline.zoom)),
+           outline.tableView.window != nil {
+            readingPositions.removeAll { $0.target.showsSame(as: current) }
+            if let anchor = outline.readingAnchor() {
+                readingPositions.append((current, anchor))
+                if readingPositions.count > 50 { readingPositions.removeFirst() }
+            }
+        }
+        returningTo = fromHistory ? destination : nil
+        current = destination
+    }
+
+    func presentMainOutline(_ outline: OutlineEditorController) {
+        let target = NavTarget.page(name: outline.pageName, zoom: outline.zoom)
+        guard target == current else { return }
+        mainOutline = outline
+        guard returningTo == target else { return }
+        returningTo = nil
+        outline.restoreReadingPosition(readingPositions.first { $0.target.showsSame(as: target) }?.anchor)
+    }
+
     private var history = NavHistory()
     private var graphChanges: AnyCancellable?
 
@@ -115,7 +142,7 @@ final class Navigator: ObservableObject {
         guard let resolved = resolve(target) else { return }
         guard resolved != current else { return }
         history.push(from: current)
-        current = resolved
+        changeDestination(to: resolved, fromHistory: false)
         closeFind() // find is per-page; navigating away dismisses it
         if recordVisit, let name = resolved.pageName {
             app.recordVisit(toPageNamed: name)
@@ -231,23 +258,22 @@ final class Navigator: ObservableObject {
     var forwardTitles: [String] { history.forward.reversed().map(historyTitle) }
 
     func goBack(steps: Int = 1) {
-        var target = current
-        var moved = false
-        for _ in 0..<max(1, steps) {
-            guard let t = history.goBack(from: target) else { break }
-            target = t; moved = true
-        }
-        if moved { current = resolve(target) ?? target }
+        followHistory(steps: steps, forward: false)
     }
 
     func goForward(steps: Int = 1) {
-        var target = current
-        var moved = false
+        followHistory(steps: steps, forward: true)
+    }
+
+    private func followHistory(steps: Int, forward: Bool) {
+        var destination: NavTarget?
         for _ in 0..<max(1, steps) {
-            guard let t = history.goForward(from: target) else { break }
-            target = t; moved = true
+            let from = destination ?? current
+            guard let next = forward ? history.goForward(from: from) : history.goBack(from: from)
+            else { break }
+            destination = next
         }
-        if moved { current = resolve(target) ?? target }
+        if let destination { changeDestination(to: resolve(destination) ?? destination, fromHistory: true) }
     }
 
     private func historyTitle(_ target: NavTarget) -> String {
@@ -336,12 +362,19 @@ final class Navigator: ObservableObject {
         if panes != rightPanes { rightPanes = panes }
     }
 
+    private func forgetReadingPositions(for name: String) {
+        let key = PageName.key(name)
+        readingPositions.removeAll { $0.target.pageName.map(PageName.key) == key }
+    }
+
     func renamePage(from old: String, to new: String) throws {
         app.flushPendingSaves()
         refreshResolvedTargets()
         let old = app.store.canonicalPageName(for: old)
         try app.renamePage(from: old, to: new)
         let oldKey = PageName.key(old)
+        forgetReadingPositions(for: old)
+        forgetReadingPositions(for: new)
         if case .page(let name, let zoom) = current, PageName.key(name) == oldKey {
             current = .page(name: new, zoom: zoom)
         }
@@ -367,6 +400,7 @@ final class Navigator: ObservableObject {
         refreshResolvedTargets()
         let name = app.store.canonicalPageName(for: name)
         try app.deletePage(named: name)
+        forgetReadingPositions(for: name)
         if current.pageName.map({ PageName.key($0) == PageName.key(name) }) == true {
             current = .journalHome
         }

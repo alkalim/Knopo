@@ -146,7 +146,7 @@ import KnopoCore
     /// unrelated block — the flash (and the scroll with it) landed somewhere random.
     @MainActor
     @Test func theHighlightMatcherOnlyAcceptsABlockThatStillCarriesTheContent() {
-        typealias Candidate = OutlineEditorController.HighlightCandidate
+        typealias Candidate = OutlineEditorController.BlockAnchor
         let rows = [
             Candidate(id: UUID(), path: [0], content: "first"),
             Candidate(id: UUID(), path: [1], content: "second"),

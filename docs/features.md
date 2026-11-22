@@ -373,7 +373,7 @@ Knopo also recognizes journal filenames that use underscores, such as
 - **Find in Page** (`⌘F`) finds substrings in the visible outline. On the journal
   home it searches all currently rendered days. Use `⌘G` and `⇧⌘G` to move
   between matches.
-- **Back** and **Forward** (`⌘[` and `⌘]`) move through navigation history.
+- **Back** and **Forward** (`⌘[` and `⌘]`) move through navigation history. Returning to a main page restores the top visible outline block from the last visit in that tab.
 - **Favourites**, **Recents**, **Tags**, and **All Pages** live in the left
   sidebar. Recents can be cleared from the View menu.
 - The **right sidebar** holds a stack of page or tag panes for side-by-side

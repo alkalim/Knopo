@@ -543,13 +543,10 @@ final class OutlineEditorController: NSObject {
     private struct Reveal {
         let blockID: UUID
         let rightPaneNavigationToken: Int
-        /// Whether to flash the row on arrival - a caret is its own answer.
-        let flashes: Bool
-        /// Whether to bring what precedes the row along with it: a caret to write
-        /// at belongs at the foot of the view, a clicked result wherever it lands.
-        let showsRunUp: Bool
-        /// Where the row sat when it was last scrolled to; nil before the first.
-        var rowMinY: CGFloat?
+        enum Purpose { case result, writing, history }
+        let purpose: Purpose
+        /// Last scroll origin for history restoration, or row top for a reveal.
+        var lastTargetY: CGFloat?
         let settlingTime: TimeInterval
         /// Starts when the outline reaches a window and can scroll. After this
         /// deadline, edits and resizing must not pull the reader back.
@@ -855,6 +852,27 @@ final class OutlineEditorController: NSObject {
 
     // MARK: - Presentation / reload
 
+    func readingAnchor() -> BlockAnchor? {
+        guard let scroll = tableView.enclosingScrollView else { return nil }
+        let clip = scroll.contentView
+        let point = NSPoint(x: clip.bounds.midX, y: clip.bounds.minY + scroll.contentInsets.top)
+        let local = tableView.convert(point, from: clip)
+        let index = tableView.row(at: local)
+        guard rows.indices.contains(index) else { return nil }
+        let row = rows[index]
+        return BlockAnchor(id: row.block.id, path: row.path, content: row.block.content)
+    }
+
+    func restoreReadingPosition(_ anchor: BlockAnchor?) {
+        guard let first = rows.first, rows.count > 1 || !first.block.content.isEmpty else { return }
+        autoFocusedPresentation = presentationKey
+        guard let anchor else { return }
+        guard let row = scrollAnchorRow(for: anchor.id)
+                ?? rows.firstIndex(where: { $0.path == anchor.path && $0.block.content == anchor.content })
+        else { return }
+        requestReveal(of: rows[row].block.id, for: .history)
+    }
+
     func present(pageName: String, zoom: UUID?, refreshContent: Bool = true) {
         // `zoom` here is the block-zoom UUID; `BlockRenderer.zoom` is the content
         // font-zoom — both flow through here.
@@ -916,6 +934,7 @@ final class OutlineEditorController: NSObject {
                 self.focusForWritingIfNeeded(explicit: true)
             }
         }
+        if !inPane, !inJournalFeed { nav.presentMainOutline(self) }
         applyPendingHighlightIfNeeded()
         focusForWritingIfNeeded()
     }
@@ -1055,7 +1074,7 @@ final class OutlineEditorController: NSObject {
     /// editor and the feed re-measures after, each pass putting the offset back.
     /// Its window is short, so it stops fighting the reader's own scrolling.
     private func revealFocusedRow(_ id: UUID) {
-        requestReveal(of: id, flash: false, runUp: true, within: 0.5)
+        requestReveal(of: id, for: .writing, within: 0.5)
     }
 
     /// Adds the trailing block today's journal opens into. Deliberately *not* a
@@ -1076,9 +1095,8 @@ final class OutlineEditorController: NSObject {
         "\(pageName)#\(zoom?.uuidString ?? "")"
     }
 
-    /// One row as the highlight matcher sees it — enough to recognise the clicked
-    /// block without a table.
-    struct HighlightCandidate: Equatable {
+    /// Identifies an outline row across edits and fresh parses.
+    struct BlockAnchor: Equatable {
         let id: UUID
         let path: [Int]
         let content: String
@@ -1096,7 +1114,7 @@ final class OutlineEditorController: NSObject {
     /// page can repeat itself. Nothing matching flashes nothing — the page stays
     /// where it opened rather than jumping somewhere that wasn't clicked.
     static func highlightRow(
-        _ target: BlockHighlight, in candidates: [HighlightCandidate],
+        _ target: BlockHighlight, in candidates: [BlockAnchor],
         pathAtPosition: (Int) -> [Int]?
     ) -> Int? {
         if let byID = candidates.firstIndex(where: { $0.id == target.blockID }) { return byID }
@@ -1128,7 +1146,7 @@ final class OutlineEditorController: NSObject {
         guard let index = Self.highlightRow(
             hl,
             in: rows.map {
-                HighlightCandidate(id: $0.block.id, path: $0.path, content: $0.block.content)
+                BlockAnchor(id: $0.block.id, path: $0.path, content: $0.block.content)
             },
             pathAtPosition: { app.document(for: pageName).blocks.path(atPreorderPosition: $0) }
         ) else {
@@ -1150,11 +1168,11 @@ final class OutlineEditorController: NSObject {
     /// Asks for a block to be scrolled to and flashed: as soon as the geometry means
     /// something, and again after each re-measure that moves the row, until the
     /// layout settles.
-    private func requestReveal(of blockID: UUID, flash: Bool = true,
-                               runUp: Bool = false, within window: TimeInterval = 2) {
+    private func requestReveal(of blockID: UUID, for purpose: Reveal.Purpose = .result,
+                               within window: TimeInterval = 2) {
         revealRequest = Reveal(blockID: blockID, rightPaneNavigationToken: nav.rightPaneNavigationToken,
-                               flashes: flash, showsRunUp: runUp,
-                               rowMinY: nil, settlingTime: window, until: nil)
+                               purpose: purpose,
+                               lastTargetY: nil, settlingTime: window, until: nil)
         revealIfPossible()
     }
 
@@ -1192,10 +1210,23 @@ final class OutlineEditorController: NSObject {
         // Settled for now — but the request is kept until its window runs out: more
         // re-measures follow, and each can move the row out of view again.
         let topOverlap = tableView.enclosingScrollView?.contentInsets.top ?? 0
+        if request.purpose == .history, let document = scroll.documentView {
+            let rowTop = tableView.convert(tableView.rect(ofRow: row), to: document).minY
+            let clip = scroll.contentView
+            var bounds = clip.bounds
+            bounds.origin.y = rowTop - topOverlap
+            let origin = clip.constrainBoundsRect(bounds).origin
+            guard request.lastTargetY != origin.y else { return }
+            OutlineScrollAnchor.cancel(in: tableView)
+            clip.scroll(to: origin)
+            scroll.reflectScrolledClipView(clip)
+            revealRequest?.lastTargetY = origin.y
+            return
+        }
         if Self.revealHasSettled(rowRect: tableView.rect(ofRow: row),
                                  visibleRect: tableView.visibleRect,
                                  topOverlap: topOverlap,
-                                 scrolledTo: request.rowMinY) {
+                                 scrolledTo: request.lastTargetY) {
             return
         }
         // Scroll so the row clears the toolbar band and has a row's worth of margin
@@ -1206,7 +1237,7 @@ final class OutlineEditorController: NSObject {
         var target = tableView.rect(ofRow: row)
         target.origin.y -= topOverlap + margin
         target.size.height += topOverlap + margin * 2
-        if request.showsRunUp {
+        if request.purpose == .writing {
             // Show the entry above the caret, stopping at this day's heading.
             let windowful = tableView.enclosingScrollView?.documentVisibleRect.height
                 ?? tableView.visibleRect.height
@@ -1222,7 +1253,7 @@ final class OutlineEditorController: NSObject {
             }
         }
         OutlineScrollAnchor.cancel(in: tableView)
-        if request.showsRunUp, inJournalFeed, let document = scroll.documentView {
+        if request.purpose == .writing, inJournalFeed, let document = scroll.documentView {
             // The target already includes the toolbar inset. Set the origin
             // directly so AppKit does not apply that inset a second time.
             let origin = document.convert(target, from: tableView).minY
@@ -1232,8 +1263,8 @@ final class OutlineEditorController: NSObject {
             tableView.scrollToVisible(target)
         }
         tableView.layoutSubtreeIfNeeded()
-        revealRequest?.rowMinY = tableView.rect(ofRow: row).minY
-        guard request.flashes else { return }
+        revealRequest?.lastTargetY = tableView.rect(ofRow: row).minY
+        guard request.purpose == .result else { return }
         guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
             as? OutlineRowCell else { return }
         // Cells are reused, so a flash still running on another row goes out first —
