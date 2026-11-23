@@ -2,6 +2,34 @@
 
 Notable changes per release, newest first.
 
+## v0.10.0 (2026-11-23)
+
+Pages get aliases, editable properties, and tags.
+
+**New**
+
+- Give a page one or more aliases with alias::. Use them in links, search (⌘K) and autocomplete. Linked References includes links to the page name and all its aliases.
+- Choose **Add Page Property** from the page menu, or click a property above the outline to edit it.
+- Tag a whole page with `tags::` to find it in tag views and queries.
+- Markdown headings without a bullet are now editable outline blocks.
+- Drag to reorder pages and tags together in Favourites.
+- Choose **Open in New Window** to open a page or tag with both sidebars hidden.
+- Click a task checkbox in an inline block reference to mark the source task done or reopen it.
+
+**Improved**
+
+- Back and Forward restore scroll position.
+- A `title::` above the outline sets the page heading, breadcrumb, tab title and right-sidebar card header.
+- Long journal feeds open faster.
+- Blocks with many links or Markdown formatting markers are faster to display and edit.
+
+**Fixes**
+
+- Future journal entries appear above today, newest first.
+- Find in Page clears stale matches as you scroll through the journal.
+- The left sidebar highlights the selected row immediately.
+- Search no longer crashes when recent page names have equivalent Unicode spellings.
+
 ## v0.9.0 (2026-11-06)
 
 Numbered lists, smoother editing and scrolling, and native macOS controls.

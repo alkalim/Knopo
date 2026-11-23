@@ -44,8 +44,9 @@ for explicit and nested logic.
 
 ### Tags
 
-`#tag` matches blocks carrying that tag. Tag matching is case-insensitive because
-Knopo normalizes tags to lowercase.
+`#work` matches blocks tagged `#work` and pages with `work` in their `tags::`
+property above the outline. A page tag applies to the page as a whole. Tag
+matching is case-insensitive.
 
 ```markdown
 {{query #work}}
@@ -57,8 +58,8 @@ A tag filter matches a tag token, not plain text containing the same word.
 
 ### Page references
 
-`[[Page Name]]` matches blocks that link to that page. Page identity is
-case-insensitive.
+`[[Page Name]]` matches blocks that link to the page by its name or an alias.
+You can use either name in the query. Page identity is case-insensitive.
 
 ```markdown
 {{query [[Project Knopo]]}}
@@ -136,10 +137,11 @@ only properties:
              (property "status" "active"))}}
 ```
 
-Page properties remain separate from block properties. Page-level matching is
-available only when the whole expression consists of property filters combined
-with `and` or `or`. If an expression also contains a tag, page reference, task,
-or `not`, Knopo evaluates it only against blocks.
+Page-level matches can combine tag and property filters with `and` or `or`.
+For example, `{{query (and #work (property "status" "active"))}}` can find a
+page with both `tags:: work` and `status:: active` above its outline. Knopo
+tests each block against its own tags and properties. Expressions containing
+a page reference, task, or `not` return only blocks.
 
 ## Boolean operators
 
