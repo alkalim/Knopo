@@ -14,8 +14,11 @@ import KnopoCore
             session.begin(app: app, pageName: original.name, index: 0, inserting: true)
             session.text = "title:: Custom title"
             #expect(session.finish())
+            let target = NavTarget.page(name: original.name)
+            #expect(app.heading(for: target) == "Custom title")
             #expect(app.displayTitle(for: app.document(for: original.name)) == "Custom title")
             app.undo()
+            #expect(app.heading(for: target) == original.name)
             #expect(app.displayTitle(for: app.document(for: original.name)) == original.name)
             app.redo()
             #expect(app.displayTitle(for: app.document(for: original.name)) == "Custom title")

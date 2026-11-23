@@ -313,8 +313,9 @@ Page-level properties can make the page itself appear in a property query.
 
 The optional `title::` property gives an opened page a custom heading, page
 breadcrumb, and window/tab title while keeping its existing filename and links.
-For example, a journal page can have the heading "Conference notes" and still
-appear under its date in the journal feed. Knopo uses the first block's
+For example, a journal page titled "Conference notes" shows that heading in
+the main view and on its right-sidebar card, even when the card is collapsed.
+The journal feed still lists the page by date. Knopo uses the first block's
 `title::` if the page-level title is blank or missing.
 
 Links and autocomplete use page names and aliases. Navigation lists keep their

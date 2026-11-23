@@ -127,7 +127,7 @@ struct RightSidebar: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(pane.collapsed ? 0 : 90))
-                    Text(paneTitle(pane.target))
+                    Text(app.heading(for: pane.target))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -232,16 +232,6 @@ struct RightSidebar: View {
         case .allPages:
             // All Pages has its own scroll view, so bound its height here.
             AllPagesView(inPane: true).frame(height: 420)
-        }
-    }
-
-    private func paneTitle(_ target: NavTarget) -> String {
-        switch target {
-        case .page(let name, _):
-            return app.displayTitle(for: name)
-        case .tag(let tag): return "#\(tag)"
-        case .journalHome: return SectionName.journal
-        case .allPages: return SectionName.allPages
         }
     }
 

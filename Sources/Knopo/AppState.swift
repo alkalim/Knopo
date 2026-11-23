@@ -539,6 +539,15 @@ final class AppState: ObservableObject {
         document.displayTitle(using: journalDateFormat)
     }
 
+    func heading(for target: NavTarget) -> String {
+        switch target {
+        case .page(let name, _): return displayTitle(for: document(for: name))
+        case .tag(let tag): return "#\(tag)"
+        case .journalHome: return SectionName.journal
+        case .allPages: return SectionName.allPages
+        }
+    }
+
     func rebuildIndex() async throws {
         closePendingEdit?()
         flushPendingSaves()

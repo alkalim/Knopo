@@ -377,20 +377,10 @@ private struct GraphView: View {
             .focusedSceneValue(\.graphActions, actions)
             .background(WindowConfigurator(
                 onActivate: { ActiveGraph.shared.actions = actions },
-                graphName: app.store.root.lastPathComponent, pageTitle: currentTitle))
+                graphName: app.store.root.lastPathComponent, pageTitle: app.heading(for: nav.current)))
             .sheet(isPresented: $graphSettingsPresented) {
                 GraphSettingsView(app: app)
             }
-    }
-
-    /// The current page/section — used as the window tab's label.
-    private var currentTitle: String {
-        switch nav.current {
-        case .journalHome: return SectionName.journal
-        case .allPages: return SectionName.allPages
-        case .tag(let tag): return "#\(tag)"
-        case .page(let name, _): return app.displayTitle(for: app.document(for: name))
-        }
     }
 }
 
